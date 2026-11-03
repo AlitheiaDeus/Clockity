@@ -3,16 +3,16 @@
 ```mermaid
 kanban
   todo["Todo (Active Pipeline)"]
-    bug01["Matrix Fade Infinite Ghost Trails"]@{ ticket: '[BUG-01]', priority: 'High' }
-    tkt01["Matrix Screen Space Continuous Density"]@{ ticket: '[TKT-01]', priority: 'Medium' }
-    tkt02["Text Glow Toggle & Persistence"]@{ ticket: '[TKT-02]', priority: 'Medium' }
-    bug02["Cyber Grid VP Hotspot & Burn-In Mitigation"]@{ ticket: '[BUG-02]', priority: 'High' }
-    tkt03["Theme BG Accent Luminance Calibration"]@{ ticket: '[TKT-03]', priority: 'Medium' }
-    tkt04["Repository README Architecture & Guide"]@{ ticket: '[TKT-04]', priority: 'Low' }
-    tkt05["Repository Description & Metadata"]@{ ticket: '[TKT-05]', priority: 'Low' }
-    tkt06["Side-Panel Ambient FPS Calibration"]@{ ticket: '[TKT-06]', priority: 'Medium' }
   in_progress["In Progress (WIP = 1)"]
   completed["Completed (Fresh / Review)"]
+    bug01["Matrix Fade Infinite Ghost Trails"]@{ ticket: '[BUG-01]', priority: 'High' }
+    tkt01["Matrix Screen Space Continuous Density"]@{ ticket: '[TKT-01]', priority: 'Medium' }
+    bug02["Cyber Grid VP Hotspot & Burn-In Mitigation"]@{ ticket: '[BUG-02]', priority: 'High' }
+    tkt03["Theme BG Accent Luminance Calibration"]@{ ticket: '[TKT-03]', priority: 'Medium' }
+    tkt02["Text Glow Toggle & Persistence"]@{ ticket: '[TKT-02]', priority: 'Medium' }
+    tkt06["Side-Panel Ambient FPS Calibration"]@{ ticket: '[TKT-06]', priority: 'Medium' }
+    tkt04["Repository README Architecture & Guide"]@{ ticket: '[TKT-04]', priority: 'Low' }
+    tkt05["Repository Description & Metadata"]@{ ticket: '[TKT-05]', priority: 'Low' }
 ```
 
 ## Active Glance Index

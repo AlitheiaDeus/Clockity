@@ -1159,11 +1159,12 @@
         <div class="pill-grid grid-3">
             <button id="opt-blink" class="opt-pill">Blink Colon</button>
             <button id="opt-slash-zero" class="opt-pill selected">Slashed Zero</button>
-            <button id="opt-drift" class="opt-pill" title="Subtle pixel shift every 30s to prevent OLED/LCD retention">Anti-Burn Drift</button>
+            <button id="opt-text-glow" class="opt-pill selected" title="Toggle neon text bloom filter">Text Glow</button>
         </div>
-        <div class="pill-grid grid-1" style="margin-top: 0.35rem;">
+        <div class="pill-grid grid-2" style="margin-top: 0.35rem;">
+            <button id="opt-drift" class="opt-pill" title="Subtle pixel shift every 30s to prevent OLED/LCD retention">Anti-Burn Drift</button>
             <button id="opt-eco-governor" class="opt-pill" title="Suppress all high-speed animations, milliseconds, and seconds to enforce 0.016 Hz deep sleep">
-                <span class="swatch-dot" style="background: #2bd999;"></span>Eco Power Governor (Halts Animations & Sub-seconds)
+                <span class="swatch-dot" style="background: #2bd999;"></span>Eco Governor
             </button>
         </div>
 
@@ -1181,7 +1182,7 @@
         <!-- Lazy Procedural Backgrounds -->
         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
             <label class="section-label" style="margin-bottom: 0;">Animated Background</label>
-            <span style="font-size: 10px; color: #71717a;">On-Demand ~20 FPS</span>
+            <span style="font-size: 10px; color: #71717a;">On-Demand ~15 FPS Side-Panel</span>
         </div>
         <div class="pill-grid grid-3" id="bg-anim-group">
             <button data-bg="none" class="opt-pill selected">Pure Solid</button>
@@ -1438,16 +1439,16 @@
         // Theme definitions, reactive application state, and DOM node caching
         // ============================================================================
         const THEMES = {
-            emerald:   { clock: '#2bd999', date: '#24b880', bg: '#000000', bgAccent: '#072116', name: 'Emerald' },
-            amber:     { clock: '#ffb000', date: '#cc8800', bg: '#050300', bgAccent: '#241400', name: 'Amber Phosphor' },
-            cyberpunk: { clock: '#00f0ff', date: '#ff2a85', bg: '#060212', bgAccent: '#1c0734', name: 'Cyberpunk Neon' },
-            nixie:     { clock: '#ff5a1f', date: '#d97706', bg: '#090402', bgAccent: '#2a1005', name: 'Nixie Tube' },
-            mono:      { clock: '#f4f4f5', date: '#a1a1aa', bg: '#000000', bgAccent: '#1c1c20', name: 'Monochrome' },
-            crimson:   { clock: '#ff2a55', date: '#be123c', bg: '#050002', bgAccent: '#27040d', name: 'Crimson Night' },
-            ocean:     { clock: '#38bdf8', date: '#0284c7', bg: '#020813', bgAccent: '#08213e', name: 'Deep Ocean' },
-            matcha:    { clock: '#a3e635', date: '#65a30d', bg: '#040902', bgAccent: '#152608', name: 'Matcha Zen' },
-            amethyst:  { clock: '#c084fc', date: '#a855f7', bg: '#06020c', bgAccent: '#210b3b', name: 'Amethyst Violet' },
-            solarpunk: { clock: '#f59e0b', date: '#10b981', bg: '#040904', bgAccent: '#0d2818', name: 'Solarpunk Zen' }
+            emerald:   { clock: '#2bd999', date: '#24b880', bg: '#000000', bgAccent: '#0d3826', name: 'Emerald' },
+            amber:     { clock: '#ffb000', date: '#cc8800', bg: '#050300', bgAccent: '#3d2400', name: 'Amber Phosphor' },
+            cyberpunk: { clock: '#00f0ff', date: '#ff2a85', bg: '#060212', bgAccent: '#35125e', name: 'Cyberpunk Neon' },
+            nixie:     { clock: '#ff5a1f', date: '#d97706', bg: '#090402', bgAccent: '#481c08', name: 'Nixie Tube' },
+            mono:      { clock: '#f4f4f5', date: '#a1a1aa', bg: '#000000', bgAccent: '#333338', name: 'Monochrome' },
+            crimson:   { clock: '#ff2a55', date: '#be123c', bg: '#050002', bgAccent: '#480918', name: 'Crimson Night' },
+            ocean:     { clock: '#38bdf8', date: '#0284c7', bg: '#020813', bgAccent: '#0e3a6a', name: 'Deep Ocean' },
+            matcha:    { clock: '#a3e635', date: '#65a30d', bg: '#040902', bgAccent: '#28470f', name: 'Matcha Zen' },
+            amethyst:  { clock: '#c084fc', date: '#a855f7', bg: '#06020c', bgAccent: '#3c1868', name: 'Amethyst Violet' },
+            solarpunk: { clock: '#f59e0b', date: '#10b981', bg: '#040904', bgAccent: '#174228', name: 'Solarpunk Zen' }
         };
 
         const state = {
@@ -1457,6 +1458,7 @@
             showMs: false,
             blinkColon: false,
             slashedZero: true,
+            textGlow: true,
             antiBurnDrift: false,
             dateFormat: 'dmy',         // 'dmy' | 'jp' | 'mdy' | 'iso' | 'short' | 'hidden'
             bgAnim: 'none',            // 'none' | 'tod' | 'aurora' | 'stars' | 'matrix' | 'fire' | 'water' | 'static' | 'grid'
@@ -1577,6 +1579,7 @@
                     showMs: state.showMs,
                     blinkColon: state.blinkColon,
                     slashedZero: state.slashedZero,
+                    textGlow: state.textGlow,
                     antiBurnDrift: state.antiBurnDrift,
                     dateFormat: state.dateFormat,
                     bgAnim: state.bgAnim,
@@ -1669,8 +1672,9 @@
             root.style.setProperty('--date-color', state.dateColor);
             root.style.setProperty('--bg-color', state.bgColor);
             root.style.setProperty('--bg-accent-color', state.bgAccentColor);
-            root.style.setProperty('--glow-primary', hexToRgba(state.clockColor, state.ecoMode ? 0.25 : 0.52));
-            root.style.setProperty('--glow-secondary', hexToRgba(state.clockColor, state.ecoMode ? 0.08 : 0.22));
+            const glowActive = state.textGlow !== false;
+            root.style.setProperty('--glow-primary', glowActive ? hexToRgba(state.clockColor, state.ecoMode ? 0.25 : 0.52) : 'transparent');
+            root.style.setProperty('--glow-secondary', glowActive ? hexToRgba(state.clockColor, state.ecoMode ? 0.08 : 0.22) : 'transparent');
             root.style.setProperty('--clock-font', state.fontFamily);
 
             // Font-specific slot widths to eliminate digit melding
@@ -2344,8 +2348,14 @@
                     z: Math.random() * w
                 }));
             } else if (state.bgAnim === 'matrix') {
-                const numCols = Math.ceil(w / 22);
-                bgState.cols = Array.from({ length: numCols }, () => Math.random() * -40);
+                // Screen-space continuous density: tighter column pitch + subtle sub-pixel offset
+                const colWidth = 16;
+                const numCols = Math.ceil(w / colWidth) + 1;
+                bgState.matrixStreams = Array.from({ length: numCols }, (_, i) => ({
+                    x: i * colWidth + (Math.random() - 0.5) * 4,
+                    y: Math.random() * -60,
+                    speed: 0.65 + Math.random() * 0.45
+                }));
             } else if (state.bgAnim === 'fire') {
                 bgState.embers = Array.from({ length: 50 }, () => ({
                     x: Math.random() * w,
@@ -2389,7 +2399,7 @@
             }
 
             let lastFrame = 0;
-            const interval = 48; // ~20 FPS keeps CPU and battery stone-cold
+            const interval = 66; // ~15 FPS keeps side-panel GPU overhead imperceptible
 
             function render(ts) {
                 if (state.bgAnim === 'none' || state.isBlanked || state.ecoMode || document.visibilityState === 'hidden') {
@@ -2416,25 +2426,28 @@
 
             switch (state.bgAnim) {
                 case 'matrix': {
-                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.2);
+                    // Clean multi-pass fade to eliminate residual ghost trails and 8-bit floor quantization
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.32);
                     bgCtx.fillRect(0, 0, w, h);
-                    bgCtx.font = '16px monospace';
+                    bgCtx.font = '15px monospace';
                     const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎ';
-                    for (let i = 0; i < bgState.cols.length; i++) {
+                    const streams = bgState.matrixStreams || [];
+                    for (let i = 0; i < streams.length; i++) {
+                        const st = streams[i];
                         const ch = chars[Math.floor(Math.random() * chars.length)];
-                        const x = i * 22;
-                        const y = bgState.cols[i] * 20;
-                        // Coherent palette: Brighter lead glyph in Background Accent; trails in softer Background Accent
-                        if (Math.random() > 0.88) {
-                            bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.95)`;
-                        } else {
-                            bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.38)`;
+                        const y = st.y * 18;
+                        if (y >= -20 && y <= h + 20) {
+                            if (Math.random() > 0.88) {
+                                bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.95)`;
+                            } else {
+                                bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.38)`;
+                            }
+                            bgCtx.fillText(ch, st.x, y);
                         }
-                        bgCtx.fillText(ch, x, y);
                         if (y > h && Math.random() > 0.96) {
-                            bgState.cols[i] = 0;
+                            st.y = 0;
                         } else {
-                            bgState.cols[i] += 0.75;
+                            st.y += st.speed;
                         }
                     }
                     break;
@@ -2600,29 +2613,43 @@
                     const horizonY = h * 0.44;
                     bgState.gridOffset = ((bgState.gridOffset || 0) + 0.65) % 40;
 
-                    // Horizon glow using pure bgAccentColor (Palette Decoupled)
-                    const horizGrad = bgCtx.createLinearGradient(0, horizonY - 45, 0, horizonY + 25);
+                    // Anti-burn drift: gentle horizontal wander of the vanishing point over time
+                    const driftOffset = Math.sin(bgState.phase * 0.25) * 14;
+                    const cx = w / 2 + driftOffset;
+
+                    // Upper Sky Atmosphere: subtle retro twilight gradient to balance screen
+                    const skyGrad = bgCtx.createLinearGradient(0, 0, 0, horizonY);
+                    skyGrad.addColorStop(0, hexToRgba(state.bgColor, 0.9));
+                    skyGrad.addColorStop(0.7, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.08)`);
+                    skyGrad.addColorStop(1, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.22)`);
+                    bgCtx.fillStyle = skyGrad;
+                    bgCtx.fillRect(0, 0, w, horizonY);
+
+                    // Diffuse Soft Horizon Glow (avoids high-luminance pinpoint hotspot at VP)
+                    const horizGrad = bgCtx.createLinearGradient(0, horizonY - 35, 0, horizonY + 30);
                     horizGrad.addColorStop(0, 'rgba(0,0,0,0)');
-                    horizGrad.addColorStop(0.65, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.42)`);
+                    horizGrad.addColorStop(0.5, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.28)`);
                     horizGrad.addColorStop(1, 'rgba(0,0,0,0)');
                     bgCtx.fillStyle = horizGrad;
-                    bgCtx.fillRect(0, horizonY - 45, w, 70);
+                    bgCtx.fillRect(0, horizonY - 35, w, 65);
 
                     bgCtx.save();
                     bgCtx.beginPath();
                     bgCtx.rect(0, horizonY, w, h - horizonY);
                     bgCtx.clip();
 
-                    const cx = w / 2;
-                    // Fanning vertical perspective lines
-                    const numLines = Math.floor(w / 40) + 8;
+                    // Road Grid: Perspective lines with VP burn-in truncation
+                    const numLines = Math.floor(w / 38) + 12;
                     for (let i = -numLines; i <= numLines; i++) {
-                        const bottomX = cx + i * 95;
+                        const bottomX = cx + i * 85;
+                        // Truncate start slightly below horizon to avoid stationary convergence hotspot
+                        const startY = horizonY + 8;
+                        const startX = cx + (bottomX - cx) * 0.04;
                         bgCtx.beginPath();
-                        bgCtx.moveTo(cx, horizonY);
+                        bgCtx.moveTo(startX, startY);
                         bgCtx.lineTo(bottomX, h);
-                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.32)`;
-                        bgCtx.lineWidth = 1.3;
+                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.24)`;
+                        bgCtx.lineWidth = 1.2;
                         bgCtx.stroke();
                     }
 
@@ -2631,7 +2658,7 @@
                     for (let y = bgState.gridOffset; y < floorH; y += 32) {
                         const ratio = Math.pow(y / floorH, 1.85);
                         const py = horizonY + ratio * floorH;
-                        const lineAlpha = Math.min(0.65, ratio * 0.75);
+                        const lineAlpha = Math.min(0.55, ratio * 0.68);
                         bgCtx.beginPath();
                         bgCtx.moveTo(0, py);
                         bgCtx.lineTo(w, py);
@@ -2639,6 +2666,20 @@
                         bgCtx.lineWidth = 1.2;
                         bgCtx.stroke();
                     }
+
+                    // Smooth lateral corner gradients between road edge and horizon
+                    const leftEdgeGrad = bgCtx.createLinearGradient(0, horizonY, w * 0.18, horizonY + floorH * 0.4);
+                    leftEdgeGrad.addColorStop(0, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.18)`);
+                    leftEdgeGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                    bgCtx.fillStyle = leftEdgeGrad;
+                    bgCtx.fillRect(0, horizonY, w * 0.2, floorH);
+
+                    const rightEdgeGrad = bgCtx.createLinearGradient(w, horizonY, w * 0.82, horizonY + floorH * 0.4);
+                    rightEdgeGrad.addColorStop(0, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.18)`);
+                    rightEdgeGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                    bgCtx.fillStyle = rightEdgeGrad;
+                    bgCtx.fillRect(w * 0.8, horizonY, w * 0.2, floorH);
+
                     bgCtx.restore();
                     break;
                 }
@@ -2797,6 +2838,8 @@
             document.getElementById('opt-seconds').classList.toggle('selected', state.showSeconds);
             document.getElementById('opt-ms').classList.toggle('selected', state.showMs);
             document.getElementById('opt-blink').classList.toggle('selected', state.blinkColon);
+            const glowBtn = document.getElementById('opt-text-glow');
+            if (glowBtn) glowBtn.classList.toggle('selected', state.textGlow !== false);
             // Slashed zero indicator & OpenType capability detection
             const slashBtn = document.getElementById('opt-slash-zero');
             const hasOpenTypeSlash = state.fontFamily.includes('Orbitron') || 
@@ -2962,6 +3005,18 @@
             savePreferences();
             showToast(state.slashedZero ? 'OpenType Slashed Ø On' : 'Standard 0');
         });
+
+        // Text Glow Toggle
+        const optGlowBtn = document.getElementById('opt-text-glow');
+        if (optGlowBtn) {
+            optGlowBtn.addEventListener('click', () => {
+                state.textGlow = (state.textGlow === false);
+                applyVisuals();
+                syncDrawerUI();
+                savePreferences();
+                showToast(state.textGlow ? 'Text Glow: Active' : 'Text Glow: Flat / Crisp');
+            });
+        }
 
         // Anti-Burn Drift
         document.getElementById('opt-drift').addEventListener('click', () => {
