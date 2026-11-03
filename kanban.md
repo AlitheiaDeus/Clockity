@@ -3,14 +3,14 @@
 ```mermaid
 kanban
   todo["Todo (Active Pipeline)"]
-    bug03["Chime Preview Plays Sound When Off"]@{ ticket: '[BUG-03]', priority: 'Medium' }
-    bug04["BG Accent Low Alpha & Inadequate Vibrancy"]@{ ticket: '[BUG-04]', priority: 'High' }
-    tkt07["Matrix True Random Screen Space Drops"]@{ ticket: '[TKT-07]', priority: 'High' }
-    tkt08["Live FPS Tracker & HUD Toggle"]@{ ticket: '[TKT-08]', priority: 'Medium' }
   reported["Reported (Backlog Candidates)"]
     pln01["New Ambient Screensavers (C-Matrix, Pixel Rain, Lasers, Tetriminos)"]@{ ticket: '[PLN-01]', priority: 'Low' }
   in_progress["In Progress (WIP = 1)"]
   completed["Completed (Fresh / Review)"]
+    bug03["Chime Preview Plays Sound When Off"]@{ ticket: '[BUG-03]', priority: 'Medium' }
+    bug04["BG Accent Low Alpha & Inadequate Vibrancy"]@{ ticket: '[BUG-04]', priority: 'High' }
+    tkt07["Matrix True Random Screen Space Drops"]@{ ticket: '[TKT-07]', priority: 'High' }
+    tkt08["Live FPS Tracker & HUD Toggle"]@{ ticket: '[TKT-08]', priority: 'Medium' }
     bug01["Matrix Fade Infinite Ghost Trails"]@{ ticket: '[BUG-01]', priority: 'High' }
     tkt01["Matrix Screen Space Continuous Density"]@{ ticket: '[TKT-01]', priority: 'Medium' }
     bug02["Cyber Grid VP Hotspot & Burn-In Mitigation"]@{ ticket: '[BUG-02]', priority: 'High' }

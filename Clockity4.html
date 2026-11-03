@@ -1161,10 +1161,11 @@
             <button id="opt-slash-zero" class="opt-pill selected">Slashed Zero</button>
             <button id="opt-text-glow" class="opt-pill selected" title="Toggle neon text bloom filter">Text Glow</button>
         </div>
-        <div class="pill-grid grid-2" style="margin-top: 0.35rem;">
+        <div class="pill-grid grid-3" style="margin-top: 0.35rem;">
             <button id="opt-drift" class="opt-pill" title="Subtle pixel shift every 30s to prevent OLED/LCD retention">Anti-Burn Drift</button>
+            <button id="opt-fps" class="opt-pill" title="Real-time measured frame rate monitor">Live FPS</button>
             <button id="opt-eco-governor" class="opt-pill" title="Suppress all high-speed animations, milliseconds, and seconds to enforce 0.016 Hz deep sleep">
-                <span class="swatch-dot" style="background: #2bd999;"></span>Eco Governor
+                <span class="swatch-dot" style="background: #2bd999;"></span>Eco
             </button>
         </div>
 
@@ -1439,16 +1440,16 @@
         // Theme definitions, reactive application state, and DOM node caching
         // ============================================================================
         const THEMES = {
-            emerald:   { clock: '#2bd999', date: '#24b880', bg: '#000000', bgAccent: '#0d3826', name: 'Emerald' },
-            amber:     { clock: '#ffb000', date: '#cc8800', bg: '#050300', bgAccent: '#3d2400', name: 'Amber Phosphor' },
-            cyberpunk: { clock: '#00f0ff', date: '#ff2a85', bg: '#060212', bgAccent: '#35125e', name: 'Cyberpunk Neon' },
-            nixie:     { clock: '#ff5a1f', date: '#d97706', bg: '#090402', bgAccent: '#481c08', name: 'Nixie Tube' },
-            mono:      { clock: '#f4f4f5', date: '#a1a1aa', bg: '#000000', bgAccent: '#333338', name: 'Monochrome' },
-            crimson:   { clock: '#ff2a55', date: '#be123c', bg: '#050002', bgAccent: '#480918', name: 'Crimson Night' },
-            ocean:     { clock: '#38bdf8', date: '#0284c7', bg: '#020813', bgAccent: '#0e3a6a', name: 'Deep Ocean' },
-            matcha:    { clock: '#a3e635', date: '#65a30d', bg: '#040902', bgAccent: '#28470f', name: 'Matcha Zen' },
-            amethyst:  { clock: '#c084fc', date: '#a855f7', bg: '#06020c', bgAccent: '#3c1868', name: 'Amethyst Violet' },
-            solarpunk: { clock: '#f59e0b', date: '#10b981', bg: '#040904', bgAccent: '#174228', name: 'Solarpunk Zen' }
+            emerald:   { clock: '#2bd999', date: '#24b880', bg: '#000000', bgAccent: '#10b981', name: 'Emerald' },
+            amber:     { clock: '#ffb000', date: '#cc8800', bg: '#050300', bgAccent: '#f59e0b', name: 'Amber Phosphor' },
+            cyberpunk: { clock: '#00f0ff', date: '#ff2a85', bg: '#060212', bgAccent: '#c026d3', name: 'Cyberpunk Neon' },
+            nixie:     { clock: '#ff5a1f', date: '#d97706', bg: '#090402', bgAccent: '#f97316', name: 'Nixie Tube' },
+            mono:      { clock: '#f4f4f5', date: '#a1a1aa', bg: '#000000', bgAccent: '#71717a', name: 'Monochrome' },
+            crimson:   { clock: '#ff2a55', date: '#be123c', bg: '#050002', bgAccent: '#e11d48', name: 'Crimson Night' },
+            ocean:     { clock: '#38bdf8', date: '#0284c7', bg: '#020813', bgAccent: '#0284c7', name: 'Deep Ocean' },
+            matcha:    { clock: '#a3e635', date: '#65a30d', bg: '#040902', bgAccent: '#84cc16', name: 'Matcha Zen' },
+            amethyst:  { clock: '#c084fc', date: '#a855f7', bg: '#06020c', bgAccent: '#9333ea', name: 'Amethyst Violet' },
+            solarpunk: { clock: '#f59e0b', date: '#10b981', bg: '#040904', bgAccent: '#059669', name: 'Solarpunk Zen' }
         };
 
         const state = {
@@ -1460,6 +1461,8 @@
             slashedZero: true,
             textGlow: true,
             antiBurnDrift: false,
+            showFps: false,
+            measuredFps: 0,
             dateFormat: 'dmy',         // 'dmy' | 'jp' | 'mdy' | 'iso' | 'short' | 'hidden'
             bgAnim: 'none',            // 'none' | 'tod' | 'aurora' | 'stars' | 'matrix' | 'fire' | 'water' | 'static' | 'grid'
             theme: 'emerald',
@@ -1581,6 +1584,7 @@
                     slashedZero: state.slashedZero,
                     textGlow: state.textGlow,
                     antiBurnDrift: state.antiBurnDrift,
+                    showFps: state.showFps,
                     dateFormat: state.dateFormat,
                     bgAnim: state.bgAnim,
                     theme: state.theme,
@@ -1872,6 +1876,19 @@
          * ON-DEMAND ZERO-IDLE SCHEDULING ENGINE
          * ========================================================================
          */
+        function updateHudRateLabel(customText) {
+            if (customText) {
+                state.lastSchedulerText = customText;
+            }
+            const baseText = customText || state.lastSchedulerText || 'Active';
+            if (state.showFps) {
+                const fpsVal = state.measuredFps || 0;
+                ecoRateText.textContent = `${fpsVal} FPS • ${baseText}`;
+            } else {
+                ecoRateText.textContent = baseText;
+            }
+        }
+
         function stopAllSchedulers() {
             if (state.tickTimeoutId) {
                 clearTimeout(state.tickTimeoutId);
@@ -1888,7 +1905,8 @@
 
             // Total freeze if tab is hidden or blanked
             if (document.visibilityState === 'hidden' || state.isBlanked) {
-                ecoRateText.textContent = 'Suspended • 0.0 Hz';
+                state.measuredFps = 0;
+                updateHudRateLabel('Suspended • 0.0 Hz');
                 return;
             }
 
@@ -1897,13 +1915,23 @@
 
             if (needsRaf && !state.ecoMode) {
                 // Adaptive High-Freq Loop (~30 FPS, smooth & GPU-efficient)
-                ecoRateText.textContent = 'High Precision • 30 Hz';
+                updateHudRateLabel('High Precision • 30 Hz');
                 let lastTick = 0;
+                let hfFrames = 0;
+                let hfLastSample = performance.now();
                 function step(ts) {
                     if (document.visibilityState === 'hidden' || state.isBlanked) return;
                     if (ts - lastTick >= 32) {
                         updateClock();
                         lastTick = ts;
+                        hfFrames++;
+                        const now = performance.now();
+                        if (now - hfLastSample >= 1000) {
+                            state.measuredFps = Math.round((hfFrames * 1000) / (now - hfLastSample));
+                            hfFrames = 0;
+                            hfLastSample = now;
+                            updateHudRateLabel();
+                        }
                     }
                     state.highFreqRafId = requestAnimationFrame(step);
                 }
@@ -1917,7 +1945,8 @@
 
             if (needsSecondTick && !state.ecoMode) {
                 // Second-Aligned Precision Tick (1.0 Hz)
-                ecoRateText.textContent = 'Active • 1.0 Hz';
+                state.measuredFps = (state.bgAnim !== 'none') ? state.measuredFps : 1;
+                updateHudRateLabel('Active • 1.0 Hz');
                 updateClock();
                 const now = new Date();
                 const msToNextSec = 1000 - now.getMilliseconds();
@@ -1930,11 +1959,12 @@
             // ZERO-IDLE MINUTE-SYNCED MODE:
             // Calculate exact milliseconds until the :00 second mark of the upcoming minute!
             // CPU enters deep sleep C-states. 0.00% CPU usage between minutes.
+            state.measuredFps = (state.bgAnim !== 'none') ? state.measuredFps : 0;
             updateClock();
             const now = new Date();
             const msToNextMin = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
             const sRemain = Math.max(1, Math.round(msToNextMin / 1000));
-            ecoRateText.textContent = state.ecoMode ? `Eco Governor • ~${sRemain}s Sleep` : `Zero-Idle • ~${sRemain}s Sleep`;
+            updateHudRateLabel(state.ecoMode ? `Eco Governor • ~${sRemain}s Sleep` : `Zero-Idle • ~${sRemain}s Sleep`);
 
             state.tickTimeoutId = setTimeout(() => {
                 scheduleNextClockTick();
@@ -2348,13 +2378,14 @@
                     z: Math.random() * w
                 }));
             } else if (state.bgAnim === 'matrix') {
-                // Screen-space continuous density: tighter column pitch + subtle sub-pixel offset
-                const colWidth = 16;
-                const numCols = Math.ceil(w / colWidth) + 1;
-                bgState.matrixStreams = Array.from({ length: numCols }, (_, i) => ({
-                    x: i * colWidth + (Math.random() - 0.5) * 4,
-                    y: Math.random() * -60,
-                    speed: 0.65 + Math.random() * 0.45
+                // Authentic C-Matrix Screensaver: True randomized screen-space drops across deadspace
+                const density = Math.floor(w / 18);
+                bgState.matrixStreams = Array.from({ length: density }, () => ({
+                    x: Math.random() * w,
+                    y: Math.random() * -100,
+                    speed: 0.8 + Math.random() * 0.9,
+                    length: Math.floor(10 + Math.random() * 18),
+                    chars: []
                 }));
             } else if (state.bgAnim === 'fire') {
                 bgState.embers = Array.from({ length: 50 }, () => ({
@@ -2399,6 +2430,8 @@
             }
 
             let lastFrame = 0;
+            let fpsFrames = 0;
+            let fpsLastSample = performance.now();
             const interval = 66; // ~15 FPS keeps side-panel GPU overhead imperceptible
 
             function render(ts) {
@@ -2408,6 +2441,14 @@
                 if (ts - lastFrame >= interval) {
                     renderBgFrame();
                     lastFrame = ts;
+                    fpsFrames++;
+                    const now = performance.now();
+                    if (now - fpsLastSample >= 1000) {
+                        state.measuredFps = Math.round((fpsFrames * 1000) / (now - fpsLastSample));
+                        fpsFrames = 0;
+                        fpsLastSample = now;
+                        updateHudRateLabel();
+                    }
                 }
                 state.bgRafId = requestAnimationFrame(render);
             }
@@ -2426,28 +2467,52 @@
 
             switch (state.bgAnim) {
                 case 'matrix': {
-                    // Clean multi-pass fade to eliminate residual ghost trails and 8-bit floor quantization
-                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.32);
+                    // C-Matrix Terminal Fade with full black floor clearance
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.35);
                     bgCtx.fillRect(0, 0, w, h);
-                    bgCtx.font = '15px monospace';
-                    const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎ';
+                    bgCtx.font = 'bold 15px monospace';
+                    const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎXYZ@#$%&*';
                     const streams = bgState.matrixStreams || [];
                     for (let i = 0; i < streams.length; i++) {
                         const st = streams[i];
-                        const ch = chars[Math.floor(Math.random() * chars.length)];
-                        const y = st.y * 18;
-                        if (y >= -20 && y <= h + 20) {
-                            if (Math.random() > 0.88) {
-                                bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.95)`;
-                            } else {
-                                bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.38)`;
+                        const headY = st.y * 18;
+                        
+                        // Render stream body in discrete terminal phosphor brightness steps
+                        for (let j = 0; j < st.length; j++) {
+                            const charY = headY - j * 18;
+                            if (charY < -20 || charY > h + 20) continue;
+                            
+                            // Mutate random glyphs in-place
+                            if (!st.chars[j] || Math.random() < 0.05) {
+                                st.chars[j] = chars[Math.floor(Math.random() * chars.length)];
                             }
-                            bgCtx.fillText(ch, st.x, y);
+                            
+                            if (j === 0) {
+                                // Blinding white / high-beam lead glyph
+                                bgCtx.fillStyle = '#ffffff';
+                            } else if (j <= 3) {
+                                // Upper tail: 100% full vibrant accent
+                                bgCtx.fillStyle = `rgb(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b})`;
+                            } else if (j <= 8) {
+                                // Mid tail: vibrant accent step-down
+                                bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.85)`;
+                            } else {
+                                // Deep tail: soft phosphor glow
+                                const alpha = Math.max(0.18, 1 - (j / st.length));
+                                bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${alpha.toFixed(2)})`;
+                            }
+                            bgCtx.fillText(st.chars[j], st.x, charY);
                         }
-                        if (y > h && Math.random() > 0.96) {
-                            st.y = 0;
-                        } else {
-                            st.y += st.speed;
+
+                        st.y += st.speed;
+
+                        // When stream completely scrolls off bottom, re-seed at a fresh random X screen coordinate
+                        if (headY - st.length * 18 > h) {
+                            st.x = Math.random() * w; // Free-flow screen space coverage
+                            st.y = -Math.random() * 8;
+                            st.speed = 0.8 + Math.random() * 0.9;
+                            st.length = Math.floor(10 + Math.random() * 18);
+                            st.chars = [];
                         }
                     }
                     break;
@@ -2467,11 +2532,11 @@
                         }
                         const sx = cx + (s.x / s.z) * (w * 0.6);
                         const sy = cy + (s.y / s.z) * (w * 0.6);
-                        const size = Math.max(0.6, (1 - s.z / w) * 3);
-                        const alpha = Math.max(0.15, 1 - s.z / w);
+                        const size = Math.max(0.7, (1 - s.z / w) * 3.2);
+                        const alpha = Math.max(0.35, 1 - s.z / w);
                         
-                        // Starfield: Deep stars shimmer softly in bgAccent, closer stars in vivid bgAccent (no rogue white stars)
-                        const starAlpha = (s.z < w * 0.35) ? Math.min(1, alpha * 1.1) : (alpha * 0.65);
+                        // Starfield: Direct high-luminance accent rendering
+                        const starAlpha = (s.z < w * 0.35) ? 1.0 : Math.min(0.85, alpha);
                         bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${starAlpha.toFixed(2)})`;
                         bgCtx.beginPath();
                         bgCtx.arc(sx, sy, size, 0, Math.PI * 2);
@@ -2482,9 +2547,9 @@
 
                 case 'fire': {
                     bgCtx.clearRect(0, 0, w, h);
-                    const baseGrad = bgCtx.createLinearGradient(0, h * 0.5, 0, h);
+                    const baseGrad = bgCtx.createLinearGradient(0, h * 0.45, 0, h);
                     baseGrad.addColorStop(0, 'rgba(0,0,0,0)');
-                    baseGrad.addColorStop(1, `rgba(${rgb.r}, ${Math.floor(rgb.g * 0.4)}, 10, 0.25)`);
+                    baseGrad.addColorStop(1, `rgba(${bgAccentRgb.r}, ${Math.floor(bgAccentRgb.g * 0.5)}, 10, 0.45)`);
                     bgCtx.fillStyle = baseGrad;
                     bgCtx.fillRect(0, 0, w, h);
 
@@ -2493,8 +2558,8 @@
                         p.x += p.vx + Math.sin(bgState.phase + p.y * 0.02) * 0.5;
                         const life = Math.max(0, p.y / h);
                         bgCtx.beginPath();
-                        bgCtx.arc(p.x, p.y, p.r * life + 0.5, 0, Math.PI * 2);
-                        bgCtx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${(p.alpha * life).toFixed(2)})`;
+                        bgCtx.arc(p.x, p.y, p.r * life + 0.6, 0, Math.PI * 2);
+                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${(Math.min(1, p.alpha * life * 1.35)).toFixed(2)})`;
                         bgCtx.fill();
                         if (p.y < -10) {
                             p.y = h + 15;
@@ -2508,11 +2573,11 @@
                     bgCtx.clearRect(0, 0, w, h);
                     for (const rp of bgState.ripples) {
                         rp.r += rp.speed;
-                        const alpha = Math.max(0, (1 - rp.r / rp.maxR) * 0.25);
+                        const alpha = Math.max(0, (1 - rp.r / rp.maxR) * 0.65);
                         bgCtx.beginPath();
                         bgCtx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
                         bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${alpha.toFixed(3)})`;
-                        bgCtx.lineWidth = 1.8;
+                        bgCtx.lineWidth = 2.0;
                         bgCtx.stroke();
                         if (rp.r >= rp.maxR) {
                             rp.r = 2;
@@ -2859,6 +2924,8 @@
                 }
             }
             document.getElementById('opt-drift').classList.toggle('selected', state.antiBurnDrift);
+            const fpsBtn = document.getElementById('opt-fps');
+            if (fpsBtn) fpsBtn.classList.toggle('selected', !!state.showFps);
 
             const ecoBtn = document.getElementById('opt-eco-governor');
             if (ecoBtn) ecoBtn.classList.toggle('selected', state.ecoMode);
@@ -3027,6 +3094,18 @@
             showToast(state.antiBurnDrift ? 'Pixel Shift Active' : 'Pixel Shift Off');
         });
 
+        // Live FPS Monitor
+        const optFpsBtn = document.getElementById('opt-fps');
+        if (optFpsBtn) {
+            optFpsBtn.addEventListener('click', () => {
+                state.showFps = !state.showFps;
+                updateHudRateLabel();
+                syncDrawerUI();
+                savePreferences();
+                showToast(state.showFps ? 'Live FPS Counter: Active' : 'Live FPS Counter: Hidden');
+            });
+        }
+
         // Date formats
         document.querySelectorAll('#date-format-group .opt-pill').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -3137,9 +3216,12 @@
         });
 
         document.getElementById('test-chime-btn').addEventListener('click', () => {
-            const previewType = state.hourlyChime === 'off' ? 'bell' : state.hourlyChime;
-            playChime(previewType);
-            showToast(`Chime Preview (${previewType.toUpperCase()})`);
+            if (state.hourlyChime === 'off') {
+                showToast('Chime is Off. Select Bell or Digital to preview.', false);
+                return;
+            }
+            playChime(state.hourlyChime);
+            showToast(`Chime Preview (${state.hourlyChime.toUpperCase()})`);
         });
 
         // Shortcuts Modal
