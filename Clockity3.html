@@ -1,0 +1,3408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" id="meta-theme-color" content="#000000">
+    <title>Clockity 3 — On-Demand Ambient Clock</title>
+    <!-- Google Fonts: Orbitron, Inter, JetBrains Mono, Share Tech Mono, Cinzel, Silkscreen -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* ============================================================================
+         * [LANDMARK: CSS_DESIGN_SYSTEM]
+         * Root design tokens, typography, color palettes, and global resets
+         * ============================================================================ */
+        :root {
+            --clock-color: #2bd999;
+            --date-color: #24b880;
+            --bg-color: #000000;
+            --bg-accent-color: #072116;
+            --glow-primary: rgba(43, 217, 153, 0.52);
+            --glow-secondary: rgba(43, 217, 153, 0.22);
+            --clock-font: 'Orbitron', sans-serif;
+            --zoom-scale: 1;
+            --brightness: 1;
+            --drift-x: 0px;
+            --drift-y: 0px;
+        }
+
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            overflow: hidden;
+            font-family: var(--clock-font);
+            cursor: default;
+            transition: background-color 0.4s ease;
+        }
+
+        body.user-idle {
+            cursor: none;
+        }
+
+        /* Eco Power Governor: strips heavy GPU shaders & drop-shadows during deep sleep */
+        body.eco-governor {
+            --glow-primary: rgba(43, 217, 153, 0.14);
+            --glow-secondary: transparent;
+        }
+        body.eco-governor .clock-container,
+        body.eco-governor .date-display,
+        body.eco-governor .ampm-indicator {
+            text-shadow: none !important;
+            filter: none !important;
+        }
+
+        /* 0-Cost Background Canvas: strictly 0x0 size until an animation is requested */
+        #bg-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+            filter: brightness(var(--brightness));
+            display: none;
+            transition: opacity 0.4s ease;
+        }
+
+        #bg-canvas.active {
+            display: block;
+        }
+
+        /* Screen Blanker / Panel De-Energizer Overlay */
+        #blanker-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 60;
+            background-color: #000000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.45s ease, background-color 0.35s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+
+        body.blanker-active #blanker-overlay {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #blanker-hint {
+            font-family: 'Inter', sans-serif;
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: rgba(255, 255, 255, 0.72);
+            background: rgba(24, 24, 27, 0.72);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 10px 22px;
+            border-radius: 9999px;
+            pointer-events: none;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+            transition: opacity 0.4s ease, transform 0.4s ease;
+        }
+
+        body.user-idle #blanker-hint {
+            opacity: 0;
+            transform: translateY(6px);
+        }
+
+        /* Main View Wrapper */
+        #clock-wrapper {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            transform: translate3d(var(--drift-x), var(--drift-y), 0) scale(var(--zoom-scale));
+            filter: brightness(var(--brightness));
+            transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease;
+            transform-origin: center center;
+            will-change: transform;
+        }
+
+        /* ============================================================================
+         * [LANDMARK: CSS_DIGITAL_CLOCK]
+         * Digital clock layout, fixed-width zero-jitter digit slots, colons, ampm
+         * ============================================================================ */
+        .clock-digits {
+            color: var(--clock-color);
+            font-family: var(--clock-font);
+            font-weight: 900;
+            font-size: clamp(3.2rem, 20vw, 24rem);
+            line-height: 0.92;
+            letter-spacing: 0.02em;
+            text-shadow: 
+                0 0 28px var(--glow-primary),
+                0 0 65px var(--glow-secondary);
+            font-variant-numeric: tabular-nums slashed-zero;
+            font-feature-settings: "zero" 1, "tnum" 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .clock-digits.with-seconds {
+            font-size: clamp(2.3rem, 13.5vw, 16.5rem);
+        }
+
+        .clock-digits.with-ms {
+            font-size: clamp(1.9rem, 11vw, 13.2rem);
+        }
+
+        /* Fixed-Width Zero-Jitter Digit Slots - Melding Prevention */
+        .digit-slot {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            width: var(--digit-slot-width, 0.72em);
+            min-width: var(--digit-slot-width, 0.72em);
+            max-width: var(--digit-slot-width, 0.72em);
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum" 1;
+            flex-shrink: 0;
+            margin: 0 0.025em; /* Guarantees adjacent wide digits (e.g. Orbitron '22', Silkscreen '22') never touch or meld */
+        }
+
+        /* Native Font Slashed Zeros (Natural OpenType font feature, zero ugly manual overlays) */
+        body.slashed-zero-on .clock-digits,
+        body.slashed-zero-on .date-display {
+            font-variant-numeric: slashed-zero tabular-nums;
+            font-feature-settings: "zero" 1, "tnum" 1;
+        }
+
+        body:not(.slashed-zero-on) .clock-digits,
+        body:not(.slashed-zero-on) .date-display {
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "zero" 0, "tnum" 1;
+        }
+
+        /* Colon Styling - Perfectly Centered Between Numbers */
+        .colon-char {
+            display: inline-flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-self: center;
+            height: 0.54em;
+            width: 0.14em;
+            margin: 0 0.08em;
+            transform: translateY(-0.02em);
+            transition: opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+            flex-shrink: 0;
+        }
+
+        .colon-dim {
+            opacity: 0.16;
+        }
+
+        .colon-dot {
+            width: 0.135em;
+            height: 0.135em;
+            background-color: var(--clock-color);
+            border-radius: 0.015em;
+            box-shadow: 
+                0 0 20px var(--glow-primary),
+                0 0 40px var(--glow-secondary);
+        }
+
+        .seconds-block {
+            display: inline-flex;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .ms-badge {
+            font-size: 0.35em;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            margin-left: 0.15em;
+            color: var(--date-color);
+            text-shadow: 0 0 15px var(--glow-secondary);
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum" 1;
+            display: inline-block;
+            width: 2.3em;
+            text-align: left;
+            align-self: flex-end;
+            margin-bottom: 0.15em;
+            flex-shrink: 0;
+        }
+
+        .ampm-badge {
+            font-size: 0.16em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin-left: 0.4em;
+            align-self: flex-end;
+            margin-bottom: 0.42em;
+            color: var(--date-color);
+            text-shadow: 0 0 15px var(--glow-secondary);
+        }
+
+        /* Date Row */
+        .date-display {
+            color: var(--date-color);
+            font-family: var(--clock-font);
+            font-weight: 400;
+            font-size: clamp(0.85rem, 3.1vw, 3.2rem);
+            letter-spacing: 0.035em;
+            margin-top: clamp(0.75rem, 2.5vw, 2.75rem);
+            text-shadow: 0 0 14px var(--glow-secondary);
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        /* ============================================================================
+         * [LANDMARK: CSS_CLOCK_MODES]
+         * Analog 12h/24h dials, percentage progress bars, sand timer hourglass
+         * ============================================================================ */
+        .mode-container {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+        }
+
+        .mode-container.active {
+            display: flex;
+        }
+
+        /* Analog Canvas */
+        #analog-canvas {
+            width: min(68vw, 56vh);
+            height: min(68vw, 56vh);
+            max-width: 500px;
+            max-height: 500px;
+        }
+
+        /* Progress Bars */
+        #view-progress {
+            width: min(86vw, 760px);
+            gap: 1.25rem;
+            padding: 0.5rem 0;
+        }
+
+        .prog-item {
+            width: 100%;
+        }
+
+        .prog-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-bottom: 0.4rem;
+            font-size: clamp(0.75rem, 1.4vw, 0.95rem);
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            color: var(--clock-color);
+            font-family: var(--clock-font);
+        }
+
+        .prog-track {
+            width: 100%;
+            height: clamp(1rem, 2vw, 1.35rem);
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+            padding: 2px;
+        }
+
+        .prog-bar {
+            height: 100%;
+            border-radius: 9999px;
+            background-color: var(--clock-color);
+            box-shadow: 0 0 16px var(--glow-primary), 0 0 32px var(--glow-secondary);
+            transition: width 0.15s linear;
+        }
+
+        /* Sand Canvas */
+        #sand-canvas {
+            width: min(64vw, 48vh);
+            height: min(66vw, 50vh);
+            max-width: 420px;
+            max-height: 440px;
+        }
+
+        #sand-time-readout {
+            margin-top: 0.5rem;
+            font-size: clamp(1.2rem, 3.2vw, 1.7rem);
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            color: var(--clock-color);
+            text-shadow: 0 0 16px var(--glow-primary);
+        }
+
+        /* Binary Matrix Mode (BCD) */
+        #view-binary {
+            width: min(92vw, 680px);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1.25rem;
+        }
+
+        #view-binary.active {
+            display: flex;
+        }
+
+        .binary-grid {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: clamp(0.75rem, 2.4vw, 2.2rem);
+        }
+
+        .binary-group {
+            display: flex;
+            gap: clamp(0.4rem, 1.2vw, 0.85rem);
+            position: relative;
+        }
+
+        .binary-col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: clamp(0.45rem, 1.2vw, 0.85rem);
+        }
+
+        .binary-bit {
+            width: clamp(20px, 3.8vw, 38px);
+            height: clamp(20px, 3.8vw, 38px);
+            border-radius: 50%;
+            border: 1.5px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.035);
+            transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+        }
+
+        .binary-bit.bit-on {
+            background-color: var(--clock-color);
+            border-color: var(--clock-color);
+            box-shadow: 0 0 14px var(--glow-primary), 0 0 28px var(--glow-secondary);
+        }
+
+        .binary-val {
+            font-size: clamp(0.95rem, 2vw, 1.35rem);
+            font-weight: 700;
+            color: var(--date-color);
+            font-family: var(--clock-font);
+            margin-top: 0.35rem;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .binary-separator {
+            font-size: clamp(1.4rem, 2.8vw, 2.4rem);
+            color: var(--date-color);
+            opacity: 0.4;
+            align-self: center;
+            transform: translateY(-0.85rem);
+            font-weight: 700;
+        }
+
+        /* ============================================================================
+         * [LANDMARK: CSS_DRAWER_HUD]
+         * Floating HUD controls, live sleep indicator badge, settings drawer modal
+         * ============================================================================ */
+        .control-bar {
+            position: fixed;
+            bottom: 0.85rem;
+            right: 1.25rem;
+            z-index: 30;
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            background: rgba(8, 8, 12, 0.72);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 0.35rem 0.65rem;
+            border-radius: 12px;
+            font-family: 'Inter', -apple-system, sans-serif;
+            transition: opacity 0.35s ease, transform 0.35s ease;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        }
+
+        body.user-idle .control-bar,
+        body.blanker-active .control-bar {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(6px);
+        }
+
+        .ctrl-btn {
+            color: #b5b5bc;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            background: transparent;
+            border: none;
+            padding: 6px 9px;
+            border-radius: 8px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: color 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
+        }
+
+        .ctrl-btn:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .ctrl-btn:active {
+            transform: scale(0.96);
+        }
+
+        .ctrl-btn.active-pill {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .ctrl-btn svg {
+            width: 15px;
+            height: 15px;
+        }
+
+        /* Real-Time Eco/Sleep Status Badge */
+        #eco-badge {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 3px 7px;
+            border-radius: 9999px;
+            background: rgba(43, 217, 153, 0.14);
+            border: 1px solid rgba(43, 217, 153, 0.3);
+            color: #2bd999;
+            letter-spacing: 0.02em;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        #eco-badge:hover {
+            background: rgba(43, 217, 153, 0.22);
+            color: #ffffff;
+        }
+
+        #eco-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background-color: #2bd999;
+            box-shadow: 0 0 6px #2bd999;
+        }
+
+        #eco-badge.eco-active {
+            background: rgba(56, 189, 248, 0.16);
+            border-color: rgba(56, 189, 248, 0.4);
+            color: #38bdf8;
+        }
+        #eco-badge.eco-active #eco-dot {
+            background-color: #38bdf8;
+            box-shadow: 0 0 6px #38bdf8;
+        }
+
+        #zoom-label {
+            color: #d1d1d6;
+            font-size: 12.5px;
+            font-weight: 600;
+            min-width: 40px;
+            text-align: center;
+            user-select: none;
+        }
+
+        /* CUSTOMIZATION DRAWER */
+        #settings-drawer {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            position: fixed;
+            bottom: 4.2rem;
+            right: 1.25rem;
+            z-index: 40;
+            width: min(94vw, 440px);
+            max-height: 82vh;
+            overflow-y: auto;
+            background: rgba(10, 10, 14, 0.94);
+            backdrop-filter: blur(28px);
+            -webkit-backdrop-filter: blur(28px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 20px;
+            padding: 1.25rem;
+            color: #e4e4e7;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65);
+            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1);
+        }
+
+        #settings-drawer.drawer-closed {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(14px) scale(0.97);
+        }
+
+        #settings-drawer::-webkit-scrollbar {
+            width: 5px;
+        }
+        #settings-drawer::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #settings-drawer::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.18);
+            border-radius: 9999px;
+        }
+
+        .drawer-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 0.75rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .drawer-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .badge-zero {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 2px 7px;
+            border-radius: 9999px;
+            background: rgba(43, 217, 153, 0.15);
+            border: 1px solid rgba(43, 217, 153, 0.35);
+            color: #2bd999;
+        }
+
+        .drawer-subtitle {
+            font-size: 11px;
+            color: #a1a1aa;
+            margin-top: 2px;
+        }
+
+        .close-btn {
+            background: transparent;
+            border: none;
+            color: #a1a1aa;
+            padding: 5px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.15s, background-color 0.15s;
+        }
+
+        .close-btn:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .section-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #a1a1aa;
+            margin-bottom: 0.45rem;
+        }
+
+        .pill-grid {
+            display: grid;
+            gap: 0.35rem;
+            margin-bottom: 1rem;
+        }
+
+        .grid-2 { grid-template-columns: repeat(2, 1fr); }
+        .grid-3 { grid-template-columns: repeat(3, 1fr); }
+        .grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+        .opt-pill {
+            font-size: 11.5px;
+            font-weight: 500;
+            padding: 6px 9px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            background: rgba(255, 255, 255, 0.035);
+            color: #d4d4d8;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+
+        .opt-pill:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+            border-color: rgba(255, 255, 255, 0.18);
+        }
+
+        .opt-pill.selected {
+            border-color: var(--clock-color);
+            background: rgba(255, 255, 255, 0.13);
+            color: #ffffff;
+            box-shadow: 0 0 12px var(--glow-secondary);
+        }
+
+        .swatch-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        /* Custom color pickers box - 2x2 clean grid for Clock, Date, Backdrop, and Backdrop Accent */
+        .custom-color-box {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.45rem;
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0.6rem;
+            border-radius: 12px;
+            margin-top: -0.4rem;
+            margin-bottom: 1rem;
+        }
+
+        .color-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            padding: 5px 9px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s;
+        }
+
+        .color-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .color-label {
+            font-size: 11px;
+            color: #d4d4d8;
+            font-weight: 500;
+        }
+
+        .color-input-wrap {
+            position: relative;
+            width: 20px;
+            height: 20px;
+            border-radius: 5px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .color-input-wrap input[type="color"] {
+            position: absolute;
+            top: -6px;
+            left: -6px;
+            width: 32px;
+            height: 32px;
+            border: none;
+            padding: 0;
+            margin: 0;
+            cursor: pointer;
+            background: none;
+        }
+
+        .color-input-wrap input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+
+        .color-input-wrap input[type="color"]::-webkit-color-swatch {
+            border: none;
+            border-radius: 4px;
+        }
+
+        .color-input-wrap input[type="color"]::-moz-color-swatch {
+            border: none;
+            border-radius: 4px;
+        }
+
+        /* Blanker Section inside drawer */
+        .blanker-panel {
+            padding-top: 0.85rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            margin-top: 0.5rem;
+        }
+
+        .blanker-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+
+        .blank-action-btn {
+            padding: 5px 10px;
+            border-radius: 7px;
+            background: rgba(255, 255, 255, 0.09);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .blank-action-btn:hover {
+            background: rgba(255, 255, 255, 0.18);
+        }
+
+        /* STATUS TOAST */
+        #status-toast {
+            position: fixed;
+            top: 1.25rem;
+            right: 1.5rem;
+            z-index: 50;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(-8px);
+            background: rgba(14, 14, 20, 0.92);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #e4e4e7;
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            padding: 6px 14px;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
+        }
+
+        #toast-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: #2bd999;
+            box-shadow: 0 0 6px #2bd999;
+        }
+
+        /* Shortcuts Cheat Sheet Modal */
+        #shortcuts-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 70;
+            background: rgba(0, 0, 0, 0.78);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease;
+        }
+
+        #shortcuts-modal.modal-active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .shortcuts-card {
+            background: rgba(12, 12, 18, 0.96);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 18px;
+            padding: 1.4rem;
+            max-width: 440px;
+            width: 100%;
+            color: #e4e4e7;
+            font-family: 'Inter', -apple-system, sans-serif;
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8);
+            transform: scale(0.95);
+            transition: transform 0.25s cubic-bezier(0.2, 0.9, 0.3, 1);
+        }
+
+        #shortcuts-modal.modal-active .shortcuts-card {
+            transform: scale(1);
+        }
+
+        .shortcuts-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.65rem 1rem;
+            margin-top: 1rem;
+        }
+
+        .shortcut-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11.5px;
+            color: #d4d4d8;
+        }
+
+        .shortcut-key {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            padding: 2px 7px;
+            border-radius: 6px;
+            font-family: 'Share Tech Mono', monospace;
+            font-weight: 700;
+            color: var(--clock-color);
+            font-size: 11px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Viewport & Responsive Media Queries */
+        @media (max-width: 768px) {
+            .control-bar {
+                bottom: 0.5rem;
+                right: 0.5rem;
+                left: 0.5rem;
+                justify-content: flex-start;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+                padding: 0.35rem 0.5rem;
+            }
+            .control-bar::-webkit-scrollbar {
+                display: none;
+            }
+            #settings-drawer {
+                right: 0.5rem;
+                left: 0.5rem;
+                width: auto;
+                bottom: 3.8rem;
+            }
+            .shortcuts-list {
+                grid-template-columns: 1fr;
+                gap: 0.5rem;
+            }
+        }
+
+        @media (max-width: 520px) {
+            .ctrl-btn span {
+                display: none;
+            }
+            #format-btn {
+                font-size: 11px;
+                padding: 5px 7px;
+            }
+            #fullscreen-btn {
+                display: none;
+            }
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="slashed-zero-on">
+    <!-- ============================================================================
+     * [LANDMARK: HTML_BODY_LAYOUT]
+     * DOM structure: Lazy canvas, blanker overlay, digital clock slots, modes, HUD, drawer
+     * ============================================================================ -->
+
+    <!-- 100% Lazy Procedural Canvas: 0x0 bytes RAM until animated effect is toggled -->
+    <canvas id="bg-canvas"></canvas>
+
+    <!-- Screen Blanker / Panel De-Energizer Overlay -->
+    <div id="blanker-overlay" title="Click or press any key to wake display">
+        <div id="blanker-hint">
+            Display Sleeping • Click Anywhere or Press Any Key to Wake
+        </div>
+    </div>
+
+    <!-- Status Toast Notification -->
+    <div id="status-toast">
+        <span id="toast-dot"></span>
+        <span id="toast-text">No Sleep Active</span>
+    </div>
+
+    <!-- Main Viewport Clock Wrapper -->
+    <main id="clock-wrapper">
+        
+        <!-- MODE 1: DIGITAL (Zero-Garbage pre-structured slots) -->
+        <div id="view-digital" class="mode-container active">
+            <div id="time-container" class="clock-digits" aria-live="polite">
+                <span id="slot-h1" class="digit-slot" data-char="0">0</span>
+                <span id="slot-h2" class="digit-slot" data-char="0">0</span>
+                
+                <span id="main-colon" class="colon-char" aria-hidden="true">
+                    <span class="colon-dot"></span>
+                    <span class="colon-dot"></span>
+                </span>
+                
+                <span id="slot-m1" class="digit-slot" data-char="0">0</span>
+                <span id="slot-m2" class="digit-slot" data-char="0">0</span>
+                
+                <!-- Optional Seconds (:SS) -->
+                <span id="seconds-wrapper" class="seconds-block hidden">
+                    <span id="sec-colon" class="colon-char" aria-hidden="true">
+                        <span class="colon-dot"></span>
+                        <span class="colon-dot"></span>
+                    </span>
+                    <span id="slot-s1" class="digit-slot" data-char="0">0</span>
+                    <span id="slot-s2" class="digit-slot" data-char="0">0</span>
+                </span>
+
+                <!-- Optional Milliseconds (.mmm) -->
+                <span id="ms-text" class="ms-badge hidden">.000</span>
+
+                <!-- 12h AM/PM Badge -->
+                <span id="ampm-text" class="ampm-badge hidden">AM</span>
+            </div>
+        </div>
+
+        <!-- MODE 2 & 3: ANALOG (12h Dial & 24h Solar Dial) -->
+        <div id="view-analog" class="mode-container">
+            <canvas id="analog-canvas" width="520" height="520"></canvas>
+        </div>
+
+        <!-- MODE 4: PROGRESS BARS (Day, Hour, Minute, Second) -->
+        <div id="view-progress" class="mode-container">
+            <div class="prog-item">
+                <div class="prog-header">
+                    <span id="prog-day-label">DAY PROGRESS (24H)</span>
+                    <span id="prog-day-val">00:00 • 0.0%</span>
+                </div>
+                <div class="prog-track">
+                    <div id="prog-day-bar" class="prog-bar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="prog-item">
+                <div class="prog-header">
+                    <span>HOUR PROGRESS (60M)</span>
+                    <span id="prog-hour-val">00m • 0%</span>
+                </div>
+                <div class="prog-track">
+                    <div id="prog-hour-bar" class="prog-bar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div class="prog-item">
+                <div class="prog-header">
+                    <span>MINUTE PROGRESS (60S)</span>
+                    <span id="prog-min-val">00s • 0%</span>
+                </div>
+                <div class="prog-track">
+                    <div id="prog-min-bar" class="prog-bar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <div id="prog-sec-row" class="prog-item hidden">
+                <div class="prog-header" style="color: var(--date-color);">
+                    <span>SECOND PROGRESS (1000MS)</span>
+                    <span id="prog-sec-val">000ms</span>
+                </div>
+                <div class="prog-track" style="height: 0.85rem;">
+                    <div id="prog-sec-bar" class="prog-bar" style="width: 0%; transition: none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODE 5: SAND TIMER (Hourglass) -->
+        <div id="view-sand" class="mode-container">
+            <canvas id="sand-canvas" width="420" height="440"></canvas>
+            <div id="sand-time-readout">00:00:00</div>
+        </div>
+
+        <!-- MODE 6: BINARY MATRIX (BCD) -->
+        <div id="view-binary" class="mode-container">
+            <div class="binary-grid">
+                <!-- Hours -->
+                <div class="binary-group" id="bin-h-group">
+                    <div class="binary-col" id="bcol-h1">
+                        <div class="binary-bit" data-bit="8"></div>
+                        <div class="binary-bit" data-bit="4"></div>
+                        <div class="binary-bit" data-bit="2"></div>
+                        <div class="binary-bit" data-bit="1"></div>
+                        <span class="binary-val">0</span>
+                    </div>
+                    <div class="binary-col" id="bcol-h2">
+                        <div class="binary-bit" data-bit="8"></div>
+                        <div class="binary-bit" data-bit="4"></div>
+                        <div class="binary-bit" data-bit="2"></div>
+                        <div class="binary-bit" data-bit="1"></div>
+                        <span class="binary-val">0</span>
+                    </div>
+                </div>
+
+                <div class="binary-separator">:</div>
+
+                <!-- Minutes -->
+                <div class="binary-group" id="bin-m-group">
+                    <div class="binary-col" id="bcol-m1">
+                        <div class="binary-bit" data-bit="8"></div>
+                        <div class="binary-bit" data-bit="4"></div>
+                        <div class="binary-bit" data-bit="2"></div>
+                        <div class="binary-bit" data-bit="1"></div>
+                        <span class="binary-val">0</span>
+                    </div>
+                    <div class="binary-col" id="bcol-m2">
+                        <div class="binary-bit" data-bit="8"></div>
+                        <div class="binary-bit" data-bit="4"></div>
+                        <div class="binary-bit" data-bit="2"></div>
+                        <div class="binary-bit" data-bit="1"></div>
+                        <span class="binary-val">0</span>
+                    </div>
+                </div>
+
+                <!-- Seconds (Optional) -->
+                <div class="binary-separator binary-sec-item hidden">:</div>
+                <div class="binary-group binary-sec-item hidden" id="bin-s-group">
+                    <div class="binary-col" id="bcol-s1">
+                        <div class="binary-bit" data-bit="8"></div>
+                        <div class="binary-bit" data-bit="4"></div>
+                        <div class="binary-bit" data-bit="2"></div>
+                        <div class="binary-bit" data-bit="1"></div>
+                        <span class="binary-val">0</span>
+                    </div>
+                    <div class="binary-col" id="bcol-s2">
+                        <div class="binary-bit" data-bit="8"></div>
+                        <div class="binary-bit" data-bit="4"></div>
+                        <div class="binary-bit" data-bit="2"></div>
+                        <div class="binary-bit" data-bit="1"></div>
+                        <span class="binary-val">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shared Date Display -->
+        <div id="date-container" class="date-display">
+            <!-- Populated dynamically with zero-char slashes -->
+        </div>
+    </main>
+
+    <!-- Customization Studio Drawer (Shortcut: C or button) -->
+    <aside id="settings-drawer" class="drawer-closed" aria-label="Settings Drawer">
+        <div class="drawer-header">
+            <div>
+                <div class="drawer-title">
+                    <span>Clockity Studio</span>
+                    <span class="badge-zero">On-Demand Engine</span>
+                </div>
+                <div class="drawer-subtitle">Zero-Idle Architecture • Lazy Subsystems</div>
+            </div>
+            <button id="close-drawer-btn" class="close-btn" title="Close Settings">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </div>
+
+        <!-- Clock Mode -->
+        <label class="section-label">Clock Mode</label>
+        <div class="pill-grid grid-3" id="clock-mode-group">
+            <button data-mode="digital" class="opt-pill selected">Digital</button>
+            <button data-mode="analog12" class="opt-pill">12h Analog</button>
+            <button data-mode="analog24" class="opt-pill">24h Analog</button>
+            <button data-mode="progress" class="opt-pill">Progress</button>
+            <button data-mode="sand" class="opt-pill">Sand Timer</button>
+            <button data-mode="binary" class="opt-pill">Binary BCD</button>
+        </div>
+
+        <!-- Time & Precision -->
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
+            <label class="section-label" style="margin-bottom: 0;">Time & Precision</label>
+            <span style="font-size: 10px; color: #71717a;">High-rate elements halt in Eco</span>
+        </div>
+        <div class="pill-grid grid-3">
+            <button id="opt-24h" class="opt-pill selected">24-Hour</button>
+            <button id="opt-seconds" class="opt-pill">Seconds (:SS)</button>
+            <button id="opt-ms" class="opt-pill">Millisec (.ms)</button>
+        </div>
+        <div class="pill-grid grid-3">
+            <button id="opt-blink" class="opt-pill">Blink Colon</button>
+            <button id="opt-slash-zero" class="opt-pill selected">Slashed Zero</button>
+            <button id="opt-drift" class="opt-pill" title="Subtle pixel shift every 30s to prevent OLED/LCD retention">Anti-Burn Drift</button>
+        </div>
+        <div class="pill-grid grid-1" style="margin-top: 0.35rem;">
+            <button id="opt-eco-governor" class="opt-pill" title="Suppress all high-speed animations, milliseconds, and seconds to enforce 0.016 Hz deep sleep">
+                <span class="swatch-dot" style="background: #2bd999;"></span>Eco Power Governor (Halts Animations & Sub-seconds)
+            </button>
+        </div>
+
+        <!-- Date Format -->
+        <label class="section-label">Date Format</label>
+        <div class="pill-grid grid-3" id="date-format-group">
+            <button data-datefmt="dmy" class="opt-pill selected" title="Full: Thursday 31 December 2026">Full</button>
+            <button data-datefmt="jp" class="opt-pill" title="日本: 2026年10月25日 (日)">日本</button>
+            <button data-datefmt="mdy" class="opt-pill" title="American: Wednesday, October 21, 2026">American</button>
+            <button data-datefmt="iso" class="opt-pill" title="Numeric: 2026-10-25 (Sun)">Numeric</button>
+            <button data-datefmt="short" class="opt-pill" title="Short: Sun, 25 Oct 2026">Short</button>
+            <button data-datefmt="hidden" class="opt-pill" title="Off: Hide date display">Off</button>
+        </div>
+
+        <!-- Lazy Procedural Backgrounds -->
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
+            <label class="section-label" style="margin-bottom: 0;">Animated Background</label>
+            <span style="font-size: 10px; color: #71717a;">On-Demand ~20 FPS</span>
+        </div>
+        <div class="pill-grid grid-3" id="bg-anim-group">
+            <button data-bg="none" class="opt-pill selected">Pure Solid</button>
+            <button data-bg="tod" class="opt-pill" title="Adaptive celestial sky based on hour of day">Time of Day</button>
+            <button data-bg="aurora" class="opt-pill">Aurora Silk</button>
+            <button data-bg="stars" class="opt-pill">Starfield</button>
+            <button data-bg="matrix" class="opt-pill">Matrix Rain</button>
+            <button data-bg="fire" class="opt-pill">Ember Fire</button>
+            <button data-bg="water" class="opt-pill">Deep Water</button>
+            <button data-bg="static" class="opt-pill">CRT Static</button>
+            <button data-bg="grid" class="opt-pill" title="Retro-futuristic perspective synth grid">Cyber Grid</button>
+        </div>
+
+        <!-- Themes & Custom Pickers -->
+        <label class="section-label">Color Theme</label>
+        <div class="pill-grid grid-4" id="theme-group">
+            <button data-theme="emerald" class="opt-pill selected">
+                <span class="swatch-dot" style="background: #2bd999;"></span>Emerald
+            </button>
+            <button data-theme="amber" class="opt-pill">
+                <span class="swatch-dot" style="background: #ffb000;"></span>Amber
+            </button>
+            <button data-theme="cyberpunk" class="opt-pill">
+                <span class="swatch-dot" style="background: #00f0ff;"></span>Cyber
+            </button>
+            <button data-theme="nixie" class="opt-pill">
+                <span class="swatch-dot" style="background: #ff5a1f;"></span>Nixie
+            </button>
+            <button data-theme="mono" class="opt-pill">
+                <span class="swatch-dot" style="background: #f4f4f5;"></span>Mono
+            </button>
+            <button data-theme="crimson" class="opt-pill">
+                <span class="swatch-dot" style="background: #ff2a55;"></span>Crimson
+            </button>
+            <button data-theme="ocean" class="opt-pill">
+                <span class="swatch-dot" style="background: #38bdf8;"></span>Ocean
+            </button>
+            <button data-theme="matcha" class="opt-pill">
+                <span class="swatch-dot" style="background: #a3e635;"></span>Matcha
+            </button>
+            <button data-theme="amethyst" class="opt-pill">
+                <span class="swatch-dot" style="background: #c084fc;"></span>Amethyst
+            </button>
+            <button data-theme="solarpunk" class="opt-pill">
+                <span class="swatch-dot" style="background: #f59e0b;"></span>Solar
+            </button>
+        </div>
+
+        <!-- Custom Color Inputs: Clock, Date, Backdrop, Backdrop Accent -->
+        <div class="custom-color-box">
+            <label class="color-item">
+                <span class="color-label">Clock</span>
+                <div class="color-input-wrap">
+                    <input type="color" id="custom-clock-color" value="#2bd999">
+                </div>
+            </label>
+            <label class="color-item">
+                <span class="color-label">Date</span>
+                <div class="color-input-wrap">
+                    <input type="color" id="custom-date-color" value="#24b880">
+                </div>
+            </label>
+            <label class="color-item">
+                <span class="color-label">Backdrop</span>
+                <div class="color-input-wrap">
+                    <input type="color" id="custom-bg-color" value="#000000">
+                </div>
+            </label>
+            <label class="color-item">
+                <span class="color-label">BG Accent</span>
+                <div class="color-input-wrap">
+                    <input type="color" id="custom-bg-accent-color" value="#072116">
+                </div>
+            </label>
+        </div>
+
+        <!-- Hourly Acoustic Chime (Web Audio API) -->
+        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
+            <label class="section-label" style="margin-bottom: 0;">Hourly Chime</label>
+            <span style="font-size: 10px; color: #71717a;">Web Audio • 0 Assets</span>
+        </div>
+        <div class="pill-grid grid-4" id="chime-group" style="margin-bottom: 1rem;">
+            <button data-chime="off" class="opt-pill selected">Off</button>
+            <button data-chime="bell" class="opt-pill">Bell</button>
+            <button data-chime="beep" class="opt-pill">Digital</button>
+            <button id="test-chime-btn" class="opt-pill" title="Preview chime sound" style="color: var(--clock-color);">Preview ♫</button>
+        </div>
+
+        <!-- Fonts -->
+        <label class="section-label">Font Face</label>
+        <div class="pill-grid grid-3" id="font-group">
+            <button data-font="'Orbitron', sans-serif" class="opt-pill selected" style="font-family: 'Orbitron', sans-serif;">Orbitron</button>
+            <button data-font="'Share Tech Mono', monospace" class="opt-pill" style="font-family: 'Share Tech Mono', monospace;">Tech Mono</button>
+            <button data-font="'JetBrains Mono', monospace" class="opt-pill" style="font-family: 'JetBrains Mono', monospace;">JetBrains</button>
+            <button data-font="'Inter', sans-serif" class="opt-pill" style="font-family: 'Inter', sans-serif;">Modern Sans</button>
+            <button data-font="'Silkscreen', monospace" class="opt-pill" style="font-family: 'Silkscreen', monospace;">Pixel LED</button>
+            <button data-font="'Cinzel', serif" class="opt-pill" style="font-family: 'Cinzel', serif;">Chronos</button>
+        </div>
+
+        <!-- Panel De-Energizer / Blackout Mode -->
+        <div class="blanker-panel">
+            <div class="blanker-header">
+                <div>
+                    <label class="section-label" style="margin-bottom: 0;">Panel De-Energizer</label>
+                    <div style="font-size: 10px; color: #a1a1aa;">Rest OLED/LCD pixels while keeping system awake</div>
+                </div>
+                <button id="drawer-blank-now-btn" class="blank-action-btn">Blank Now (B)</button>
+            </div>
+            <div class="pill-grid grid-2" style="margin-bottom: 0;">
+                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.035); padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.09);">
+                    <span style="font-size: 11px; color: #a1a1aa;">Tint</span>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        <span class="swatch-dot blank-swatch" data-color="#000000" style="background: #000; border: 1px solid #555; cursor: pointer;"></span>
+                        <span class="swatch-dot blank-swatch" data-color="#050811" style="background: #050811; border: 1px solid #444; cursor: pointer;"></span>
+                        <span class="swatch-dot blank-swatch" data-color="#0d0604" style="background: #0d0604; border: 1px solid #444; cursor: pointer;"></span>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.035); padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.09);">
+                    <span style="font-size: 11px; color: #a1a1aa;">Auto</span>
+                    <select id="auto-blank-select" style="background: transparent; color: #fff; border: none; font-size: 11px; cursor: pointer; outline: none;">
+                        <option value="0" style="background: #111;">Off</option>
+                        <option value="5" style="background: #111;">5 min</option>
+                        <option value="15" style="background: #111;">15 min</option>
+                        <option value="30" style="background: #111;">30 min</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Floating Minimal Control Bar (Matches Clockity design + on-demand metrics) -->
+    <nav class="control-bar" aria-label="Clock Controls">
+        <!-- Live On-Demand Frequency / Sleep State Badge -->
+        <div id="eco-badge" title="Click to toggle Eco Mode (Minute-Sync Sleep)">
+            <span id="eco-dot"></span>
+            <span id="eco-rate-text">0.016 Hz • Idle</span>
+        </div>
+
+        <!-- Customize Studio Toggle -->
+        <button id="customize-btn" class="ctrl-btn" title="Open Customization Studio (C)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span>Customize</span>
+        </button>
+
+        <!-- Blank Screen Toggle -->
+        <button id="blanker-btn" class="ctrl-btn" title="Blank Display (B)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+            </svg>
+            <span>Blank</span>
+        </button>
+
+        <!-- Fullscreen -->
+        <button id="fullscreen-btn" class="ctrl-btn" title="Toggle Fullscreen (F)">
+            Enter fullscreen
+        </button>
+
+        <!-- 12h / 24h Toggle -->
+        <button id="format-btn" class="ctrl-btn" title="Toggle 12h / 24h">
+            Switch to 12h
+        </button>
+
+        <!-- Brightness Dimmer -->
+        <button id="brightness-btn" class="ctrl-btn" title="Adjust Brightness" aria-label="Adjust Brightness">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="4"></circle>
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+            </svg>
+        </button>
+
+        <!-- Zoom Controls -->
+        <button id="zoom-out-btn" class="ctrl-btn" title="Zoom Out" aria-label="Zoom Out">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                <line x1="8" y1="11" x2="14" y2="11"></line>
+            </svg>
+        </button>
+
+        <span id="zoom-label">200%</span>
+
+        <button id="zoom-in-btn" class="ctrl-btn" title="Zoom In" aria-label="Zoom In">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                <line x1="11" y1="8" x2="11" y2="14"></line>
+                <line x1="8" y1="11" x2="14" y2="11"></line>
+            </svg>
+        </button>
+
+        <!-- Reset -->
+        <button id="reset-btn" class="ctrl-btn" title="Reset View (0)" aria-label="Reset View">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                <path d="M3 3v5h5"></path>
+            </svg>
+        </button>
+
+        <!-- Shortcuts Help -->
+        <button id="shortcuts-btn" class="ctrl-btn" title="Keyboard Shortcuts (?)" aria-label="Keyboard Shortcuts">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+        </button>
+    </nav>
+
+    <!-- Keyboard Shortcuts Modal (Toggle with ? or H) -->
+    <div id="shortcuts-modal" aria-label="Keyboard Shortcuts">
+        <div class="shortcuts-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 0.75rem;">
+                <div style="font-size: 14px; font-weight: 700; color: #fff;">Keyboard Shortcuts</div>
+                <button id="close-shortcuts-btn" class="close-btn" title="Close Shortcuts">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="shortcuts-list">
+                <div class="shortcut-row"><span>Customization Studio</span> <kbd class="shortcut-key">C</kbd></div>
+                <div class="shortcut-row"><span>Blank Screen (Rest)</span> <kbd class="shortcut-key">B</kbd></div>
+                <div class="shortcut-row"><span>Eco Power Governor</span> <kbd class="shortcut-key">E</kbd></div>
+                <div class="shortcut-row"><span>Fullscreen Mode</span> <kbd class="shortcut-key">F</kbd></div>
+                <div class="shortcut-row"><span>Cycle Color Themes</span> <kbd class="shortcut-key">T</kbd></div>
+                <div class="shortcut-row"><span>Clock Modes (1 to 6)</span> <kbd class="shortcut-key">1 - 6</kbd></div>
+                <div class="shortcut-row"><span>Zoom In / Out</span> <kbd class="shortcut-key">+ / -</kbd></div>
+                <div class="shortcut-row"><span>Reset View (200%)</span> <kbd class="shortcut-key">0</kbd></div>
+                <div class="shortcut-row"><span>Toggle 12h / 24h</span> <kbd class="shortcut-key">H</kbd></div>
+                <div class="shortcut-row"><span>Toggle Hourly Chime</span> <kbd class="shortcut-key">M</kbd></div>
+                <div class="shortcut-row"><span>Shortcuts Guide</span> <kbd class="shortcut-key">?</kbd></div>
+                <div class="shortcut-row"><span>Close Active Drawer</span> <kbd class="shortcut-key">Esc</kbd></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * CLOCKITY 3 — ULTRA ON-DEMAND ARCHITECTURE
+         * ==========================================
+         * Principles:
+         * 1. Zero Runtime Dependencies (Pure Vanilla CSS + JS, zero Tailwind CDN bloat)
+         * 2. Zero-Idle Schedulers:
+         *    - Digital (H:M): Sleeps until upcoming minute boundary. 0.00% CPU when idle.
+         *    - Seconds: Aligns to 1000ms boundary.
+         *    - Canvas & Dynamic modes: RAF running ONLY while that view is visible.
+         * 3. Total Freeze on Window Invisibility (VisibilityState)
+         * 4. Zero-Garbage Digit Slots (updates textContent without destroying/recreating DOM)
+         * 5. Lazy Background Canvas (0x0 pixel allocation until an animation is requested)
+         */
+        // ============================================================================
+        // [LANDMARK: JS_CORE_STATE]
+        // Theme definitions, reactive application state, and DOM node caching
+        // ============================================================================
+        const THEMES = {
+            emerald:   { clock: '#2bd999', date: '#24b880', bg: '#000000', bgAccent: '#072116', name: 'Emerald' },
+            amber:     { clock: '#ffb000', date: '#cc8800', bg: '#050300', bgAccent: '#241400', name: 'Amber Phosphor' },
+            cyberpunk: { clock: '#00f0ff', date: '#ff2a85', bg: '#060212', bgAccent: '#1c0734', name: 'Cyberpunk Neon' },
+            nixie:     { clock: '#ff5a1f', date: '#d97706', bg: '#090402', bgAccent: '#2a1005', name: 'Nixie Tube' },
+            mono:      { clock: '#f4f4f5', date: '#a1a1aa', bg: '#000000', bgAccent: '#1c1c20', name: 'Monochrome' },
+            crimson:   { clock: '#ff2a55', date: '#be123c', bg: '#050002', bgAccent: '#27040d', name: 'Crimson Night' },
+            ocean:     { clock: '#38bdf8', date: '#0284c7', bg: '#020813', bgAccent: '#08213e', name: 'Deep Ocean' },
+            matcha:    { clock: '#a3e635', date: '#65a30d', bg: '#040902', bgAccent: '#152608', name: 'Matcha Zen' },
+            amethyst:  { clock: '#c084fc', date: '#a855f7', bg: '#06020c', bgAccent: '#210b3b', name: 'Amethyst Violet' },
+            solarpunk: { clock: '#f59e0b', date: '#10b981', bg: '#040904', bgAccent: '#0d2818', name: 'Solarpunk Zen' }
+        };
+
+        const state = {
+            clockMode: 'digital',      // 'digital' | 'analog12' | 'analog24' | 'progress' | 'sand' | 'binary'
+            use24Hour: true,
+            showSeconds: false,
+            showMs: false,
+            blinkColon: false,
+            slashedZero: true,
+            antiBurnDrift: false,
+            dateFormat: 'dmy',         // 'dmy' | 'jp' | 'mdy' | 'iso' | 'short' | 'hidden'
+            bgAnim: 'none',            // 'none' | 'tod' | 'aurora' | 'stars' | 'matrix' | 'fire' | 'water' | 'static' | 'grid'
+            theme: 'emerald',
+            clockColor: '#2bd999',
+            dateColor: '#24b880',
+            bgColor: '#000000',
+            bgAccentColor: '#072116',
+            fontFamily: "'Orbitron', sans-serif",
+            zoomPercent: 200,
+            brightnessLevels: [1, 0.65, 0.35, 0.15],
+            brightnessIndex: 0,
+            isBlanked: false,
+            blankColor: '#000000',
+            autoBlankMinutes: 0,
+            ecoMode: false,
+            preEcoSnapshot: null,
+            drawerOpen: false,
+            shortcutsOpen: false,
+            hourlyChime: 'off',        // 'off' | 'bell' | 'beep'
+            lastChimedHour: -1,
+
+            // Internal scheduler IDs
+            tickTimeoutId: null,
+            highFreqRafId: null,
+            bgRafId: null,
+            driftIntervalId: null,
+            idleTimer: null,
+            autoBlankTimer: null,
+            toastTimer: null,
+            wakeLockSentinel: null,
+            lastFormattedDate: ''
+        };
+
+        // Cache DOM Elements
+        const slotH1 = document.getElementById('slot-h1');
+        const slotH2 = document.getElementById('slot-h2');
+        const slotM1 = document.getElementById('slot-m1');
+        const slotM2 = document.getElementById('slot-m2');
+        const slotS1 = document.getElementById('slot-s1');
+        const slotS2 = document.getElementById('slot-s2');
+        const msEl = document.getElementById('ms-text');
+        const ampmEl = document.getElementById('ampm-text');
+        const mainColon = document.getElementById('main-colon');
+        const secColon = document.getElementById('sec-colon');
+        const secWrapper = document.getElementById('seconds-wrapper');
+        const timeContainer = document.getElementById('time-container');
+        const dateEl = document.getElementById('date-container');
+
+        const viewDigital = document.getElementById('view-digital');
+        const viewAnalog = document.getElementById('view-analog');
+        const viewProgress = document.getElementById('view-progress');
+        const viewSand = document.getElementById('view-sand');
+        const viewBinary = document.getElementById('view-binary');
+        const shortcutsModal = document.getElementById('shortcuts-modal');
+
+        const analogCanvas = document.getElementById('analog-canvas');
+        const sandCanvas = document.getElementById('sand-canvas');
+        const sandReadout = document.getElementById('sand-time-readout');
+
+        const progDayLabel = document.getElementById('prog-day-label');
+        const progDayVal = document.getElementById('prog-day-val');
+        const progDayBar = document.getElementById('prog-day-bar');
+        const progHourVal = document.getElementById('prog-hour-val');
+        const progHourBar = document.getElementById('prog-hour-bar');
+        const progMinVal = document.getElementById('prog-min-val');
+        const progMinBar = document.getElementById('prog-min-bar');
+        const progSecRow = document.getElementById('prog-sec-row');
+        const progSecVal = document.getElementById('prog-sec-val');
+        const progSecBar = document.getElementById('prog-sec-bar');
+
+        const bgCanvas = document.getElementById('bg-canvas');
+        let bgCtx = null;
+
+        const blankerOverlay = document.getElementById('blanker-overlay');
+        const settingsDrawer = document.getElementById('settings-drawer');
+        const toastEl = document.getElementById('status-toast');
+        const toastText = document.getElementById('toast-text');
+        const toastDot = document.getElementById('toast-dot');
+        const ecoBadge = document.getElementById('eco-badge');
+        const ecoRateText = document.getElementById('eco-rate-text');
+        const zoomLabel = document.getElementById('zoom-label');
+        const formatBtn = document.getElementById('format-btn');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+
+        // Helpers
+        function hexToRgba(hex, alpha) {
+            let c = (hex || '#2bd999').replace('#', '');
+            if (c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
+            const num = parseInt(c, 16);
+            return `rgba(${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}, ${alpha})`;
+        }
+
+        function hexToRgb(hex) {
+            let c = (hex || '#2bd999').replace('#', '');
+            if (c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
+            const num = parseInt(c, 16);
+            return { r: (num >> 16) & 255, g: (num >> 8) & 255, b: num & 255 };
+        }
+
+        function loadPreferences() {
+            try {
+                const raw = localStorage.getItem('clockity_prefs_v3');
+                if (!raw) return;
+                const saved = JSON.parse(raw);
+                Object.keys(saved).forEach(k => {
+                    if (state[k] !== undefined) state[k] = saved[k];
+                });
+            } catch (e) {}
+        }
+
+        function savePreferences() {
+            try {
+                const subset = {
+                    clockMode: state.clockMode,
+                    use24Hour: state.use24Hour,
+                    showSeconds: state.showSeconds,
+                    showMs: state.showMs,
+                    blinkColon: state.blinkColon,
+                    slashedZero: state.slashedZero,
+                    antiBurnDrift: state.antiBurnDrift,
+                    dateFormat: state.dateFormat,
+                    bgAnim: state.bgAnim,
+                    theme: state.theme,
+                    clockColor: state.clockColor,
+                    dateColor: state.dateColor,
+                    bgColor: state.bgColor,
+                    bgAccentColor: state.bgAccentColor,
+                    fontFamily: state.fontFamily,
+                    zoomPercent: state.zoomPercent,
+                    brightnessIndex: state.brightnessIndex,
+                    blankColor: state.blankColor,
+                    autoBlankMinutes: state.autoBlankMinutes,
+                    ecoMode: state.ecoMode,
+                    hourlyChime: state.hourlyChime
+                };
+                localStorage.setItem('clockity_prefs_v3', JSON.stringify(subset));
+            } catch (e) {}
+        }
+
+        // ============================================================================
+        // [LANDMARK: JS_ECO_SCHEDULER]
+        // Zero-idle sleep engine, minute boundary sync, and Eco Power Governor
+        // ============================================================================
+        /**
+         * ECO POWER GOVERNOR
+         * Silences all high-rate consumers (seconds, ms, animated backgrounds, heavy GPU blur)
+         * to guarantee true 0.016 Hz minute sleep and zero-resource idle.
+         * Restores previous user configuration when turned off.
+         */
+        function setEcoMode(enable, notify = true) {
+            if (enable === state.ecoMode) return;
+            state.ecoMode = enable;
+
+            if (state.ecoMode) {
+                // Save active state to restore later
+                state.preEcoSnapshot = {
+                    showSeconds: state.showSeconds,
+                    showMs: state.showMs,
+                    bgAnim: state.bgAnim,
+                    clockMode: state.clockMode,
+                    blinkColon: state.blinkColon
+                };
+
+                // Halt all high-frequency updates and canvas loops
+                state.showSeconds = false;
+                state.showMs = false;
+                state.blinkColon = false;
+                state.bgAnim = 'none';
+
+                if (state.clockMode === 'sand') {
+                    state.clockMode = 'digital';
+                }
+
+                if (state.bgRafId) {
+                    cancelAnimationFrame(state.bgRafId);
+                    state.bgRafId = null;
+                }
+                initBgCanvas();
+
+                if (notify) showToast('Eco Mode: Animations & Sub-seconds Halted (0.016 Hz Sleep)');
+            } else {
+                // Restore user's previous preference
+                if (state.preEcoSnapshot) {
+                    state.showSeconds = state.preEcoSnapshot.showSeconds;
+                    state.showMs = state.preEcoSnapshot.showMs;
+                    state.bgAnim = state.preEcoSnapshot.bgAnim;
+                    state.clockMode = state.preEcoSnapshot.clockMode;
+                    state.blinkColon = state.preEcoSnapshot.blinkColon;
+                    state.preEcoSnapshot = null;
+                }
+                startBgLoop();
+                if (notify) showToast('Standard Mode Restored • Visual Effects Resumed');
+            }
+
+            document.body.classList.toggle('eco-governor', state.ecoMode);
+            applyVisuals();
+            syncDrawerUI();
+            applyClockMode();
+            scheduleNextClockTick();
+            savePreferences();
+        }
+
+        /**
+         * Visual System & CSS Variables
+         */
+        function applyVisuals() {
+            const root = document.documentElement;
+            root.style.setProperty('--clock-color', state.clockColor);
+            root.style.setProperty('--date-color', state.dateColor);
+            root.style.setProperty('--bg-color', state.bgColor);
+            root.style.setProperty('--bg-accent-color', state.bgAccentColor);
+            root.style.setProperty('--glow-primary', hexToRgba(state.clockColor, state.ecoMode ? 0.25 : 0.52));
+            root.style.setProperty('--glow-secondary', hexToRgba(state.clockColor, state.ecoMode ? 0.08 : 0.22));
+            root.style.setProperty('--clock-font', state.fontFamily);
+
+            // Font-specific slot widths to eliminate digit melding
+            let slotW = '0.70em';
+            if (state.fontFamily.includes('Orbitron')) slotW = '0.74em';
+            else if (state.fontFamily.includes('Silkscreen')) slotW = '0.76em';
+            else if (state.fontFamily.includes('Mono')) slotW = '0.68em';
+            else if (state.fontFamily.includes('Inter')) slotW = '0.66em';
+            else if (state.fontFamily.includes('Cinzel')) slotW = '0.70em';
+            root.style.setProperty('--digit-slot-width', slotW);
+
+            const scale = state.zoomPercent / 200;
+            root.style.setProperty('--zoom-scale', scale);
+            zoomLabel.textContent = `${state.zoomPercent}%`;
+
+            const bLevel = state.brightnessLevels[state.brightnessIndex] || 1;
+            root.style.setProperty('--brightness', bLevel);
+
+            document.body.classList.toggle('slashed-zero-on', state.slashedZero);
+            document.body.classList.toggle('eco-governor', state.ecoMode);
+            blankerOverlay.style.backgroundColor = state.blankColor;
+
+            formatBtn.textContent = state.use24Hour ? 'Switch to 12h' : 'Switch to 24h';
+            ecoBadge.classList.toggle('eco-active', state.ecoMode);
+
+            const metaTheme = document.getElementById('meta-theme-color');
+            if (metaTheme) metaTheme.setAttribute('content', state.bgColor);
+
+            // Sync color inputs
+            document.getElementById('custom-clock-color').value = state.clockColor;
+            document.getElementById('custom-date-color').value = state.dateColor;
+            document.getElementById('custom-bg-color').value = state.bgColor;
+            document.getElementById('custom-bg-accent-color').value = state.bgAccentColor;
+        }
+
+        /**
+         * ZERO-GARBAGE TEXT UPDATER
+         * Compares text before setting; applies attribute only when modified.
+         */
+        function setDigitSlot(el, char) {
+            if (el.textContent !== char) {
+                el.textContent = char;
+                el.setAttribute('data-char', char);
+            }
+        }
+
+        /**
+         * Shared Date String Formatter
+         */
+        function updateDate(now) {
+            if (state.dateFormat === 'hidden') {
+                if (!dateEl.classList.contains('hidden')) dateEl.classList.add('hidden');
+                return;
+            }
+            if (dateEl.classList.contains('hidden')) dateEl.classList.remove('hidden');
+
+            const daysLong = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const daysJp = ['日', '月', '火', '水', '木', '金', '土'];
+            const monthsLong = [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'
+            ];
+            const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+            const y = now.getFullYear();
+            const m = now.getMonth();
+            const d = now.getDate();
+            const w = now.getDay();
+
+            let text = '';
+            switch (state.dateFormat) {
+                case 'dmy':
+                    text = `${daysLong[w]} ${d} ${monthsLong[m]} ${y}`;
+                    break;
+                case 'jp':
+                    text = `${y}年${String(m + 1).padStart(2, '0')}月${String(d).padStart(2, '0')}日 (${daysJp[w]})`;
+                    break;
+                case 'mdy':
+                    text = `${daysLong[w]}, ${monthsLong[m]} ${d}, ${y}`;
+                    break;
+                case 'iso':
+                    text = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')} (${daysShort[w]})`;
+                    break;
+                case 'short':
+                    text = `${daysShort[w]}, ${d} ${monthsShort[m]} ${y}`;
+                    break;
+                default:
+                    text = `${daysLong[w]} ${d} ${monthsLong[m]} ${y}`;
+            }
+
+            if (text !== state.lastFormattedDate) {
+                state.lastFormattedDate = text;
+                dateEl.textContent = text;
+            }
+        }
+
+        // ============================================================================
+        // [LANDMARK: JS_RENDERERS_AND_MODES]
+        // Digital clock DOM slots, Analog 12h/24h dials, Progress bars, Sand timer
+        // ============================================================================
+        /**
+         * PRIMARY CLOCK UPDATE ROUTINE
+         */
+        function updateClock(forceRepaint = false) {
+            if (state.isBlanked || document.visibilityState === 'hidden') return;
+
+            const now = new Date();
+            const rawH = now.getHours();
+            const m = now.getMinutes();
+            const s = now.getSeconds();
+            const ms = now.getMilliseconds();
+
+            // 1. Digital Mode
+            if (state.clockMode === 'digital') {
+                let dispH = rawH;
+                if (!state.use24Hour) {
+                    const ampm = rawH >= 12 ? 'PM' : 'AM';
+                    dispH = rawH % 12 || 12;
+                    ampmEl.textContent = ampm;
+                    ampmEl.classList.remove('hidden');
+                } else {
+                    ampmEl.classList.add('hidden');
+                }
+
+                const hStr = String(dispH).padStart(2, '0');
+                const mStr = String(m).padStart(2, '0');
+                setDigitSlot(slotH1, hStr[0]);
+                setDigitSlot(slotH2, hStr[1]);
+                setDigitSlot(slotM1, mStr[0]);
+                setDigitSlot(slotM2, mStr[1]);
+
+                if (state.showSeconds || state.showMs) {
+                    secWrapper.classList.remove('hidden');
+                    const sStr = String(s).padStart(2, '0');
+                    setDigitSlot(slotS1, sStr[0]);
+                    setDigitSlot(slotS2, sStr[1]);
+                } else {
+                    secWrapper.classList.add('hidden');
+                }
+
+                if (state.showMs) {
+                    msEl.classList.remove('hidden');
+                    msEl.textContent = '.' + String(ms).padStart(3, '0');
+                } else {
+                    msEl.classList.add('hidden');
+                }
+
+                timeContainer.classList.toggle('with-seconds', state.showSeconds && !state.showMs);
+                timeContainer.classList.toggle('with-ms', state.showMs);
+
+                // Blinking Colon
+                if (state.blinkColon) {
+                    const dim = s % 2 === 1;
+                    mainColon.classList.toggle('colon-dim', dim);
+                    secColon.classList.toggle('colon-dim', dim);
+                } else {
+                    mainColon.classList.remove('colon-dim');
+                    secColon.classList.remove('colon-dim');
+                }
+            }
+
+            // 2. Analog Mode
+            else if (state.clockMode === 'analog12' || state.clockMode === 'analog24') {
+                drawAnalog(now);
+            }
+
+            // 3. Progress Mode
+            else if (state.clockMode === 'progress') {
+                updateProgress(now);
+            }
+
+            // 4. Sand Timer Mode
+            else if (state.clockMode === 'sand') {
+                drawSand(now);
+            }
+
+            // 5. Binary Mode (BCD)
+            else if (state.clockMode === 'binary') {
+                updateBinary(now);
+            }
+
+            // Hourly acoustic chime trigger (:00:00 of the hour)
+            if (state.hourlyChime !== 'off' && m === 0 && s === 0 && rawH !== state.lastChimedHour) {
+                state.lastChimedHour = rawH;
+                playChime(state.hourlyChime);
+            }
+
+            // Shared Date
+            updateDate(now);
+        }
+
+        /**
+         * ========================================================================
+         * ON-DEMAND ZERO-IDLE SCHEDULING ENGINE
+         * ========================================================================
+         */
+        function stopAllSchedulers() {
+            if (state.tickTimeoutId) {
+                clearTimeout(state.tickTimeoutId);
+                state.tickTimeoutId = null;
+            }
+            if (state.highFreqRafId) {
+                cancelAnimationFrame(state.highFreqRafId);
+                state.highFreqRafId = null;
+            }
+        }
+
+        function scheduleNextClockTick() {
+            stopAllSchedulers();
+
+            // Total freeze if tab is hidden or blanked
+            if (document.visibilityState === 'hidden' || state.isBlanked) {
+                ecoRateText.textContent = 'Suspended • 0.0 Hz';
+                return;
+            }
+
+            const needsRaf = state.showMs || state.clockMode === 'sand' || 
+                             (state.clockMode === 'progress' && (state.showSeconds || state.showMs));
+
+            if (needsRaf && !state.ecoMode) {
+                // Adaptive High-Freq Loop (~30 FPS, smooth & GPU-efficient)
+                ecoRateText.textContent = 'High Precision • 30 Hz';
+                let lastTick = 0;
+                function step(ts) {
+                    if (document.visibilityState === 'hidden' || state.isBlanked) return;
+                    if (ts - lastTick >= 32) {
+                        updateClock();
+                        lastTick = ts;
+                    }
+                    state.highFreqRafId = requestAnimationFrame(step);
+                }
+                state.highFreqRafId = requestAnimationFrame(step);
+                return;
+            }
+
+            const needsSecondTick = state.showSeconds || state.blinkColon || 
+                                    state.clockMode === 'analog12' || state.clockMode === 'analog24' || 
+                                    state.clockMode === 'progress';
+
+            if (needsSecondTick && !state.ecoMode) {
+                // Second-Aligned Precision Tick (1.0 Hz)
+                ecoRateText.textContent = 'Active • 1.0 Hz';
+                updateClock();
+                const now = new Date();
+                const msToNextSec = 1000 - now.getMilliseconds();
+                state.tickTimeoutId = setTimeout(() => {
+                    scheduleNextClockTick();
+                }, Math.max(20, msToNextSec));
+                return;
+            }
+
+            // ZERO-IDLE MINUTE-SYNCED MODE:
+            // Calculate exact milliseconds until the :00 second mark of the upcoming minute!
+            // CPU enters deep sleep C-states. 0.00% CPU usage between minutes.
+            updateClock();
+            const now = new Date();
+            const msToNextMin = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+            const sRemain = Math.max(1, Math.round(msToNextMin / 1000));
+            ecoRateText.textContent = state.ecoMode ? `Eco Governor • ~${sRemain}s Sleep` : `Zero-Idle • ~${sRemain}s Sleep`;
+
+            state.tickTimeoutId = setTimeout(() => {
+                scheduleNextClockTick();
+            }, Math.max(50, msToNextMin + 10)); // +10ms cushion to guarantee crossing boundary
+        }
+
+        /**
+         * MODE: ANALOG (12h / 24h)
+         */
+        function drawAnalog(now) {
+            const ctx = analogCanvas.getContext('2d');
+            const w = analogCanvas.width;
+            const h = analogCanvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+            const radius = Math.min(w, h) / 2 - 24;
+
+            ctx.clearRect(0, 0, w, h);
+
+            const is24 = state.clockMode === 'analog24';
+            const totalTicks = is24 ? 24 : 12;
+
+            // Outer ring
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius + 6, 0, Math.PI * 2);
+            ctx.strokeStyle = hexToRgba(state.clockColor, 0.28);
+            ctx.lineWidth = 2.5;
+            ctx.shadowColor = state.clockColor;
+            ctx.shadowBlur = state.ecoMode ? 6 : 16;
+            ctx.stroke();
+            ctx.restore();
+
+            // Ticks & Numerals
+            ctx.save();
+            ctx.font = `700 ${is24 ? '14px' : '18px'} ${state.fontFamily}`;
+            ctx.fillStyle = state.clockColor;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let i = 0; i < 60; i++) {
+                const angle = (i * 6 - 90) * (Math.PI / 180);
+                const isMajor = i % 5 === 0;
+                if (!is24 || !isMajor) {
+                    const innerR = isMajor ? radius - 12 : radius - 6;
+                    ctx.beginPath();
+                    ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR);
+                    ctx.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+                    ctx.strokeStyle = isMajor ? state.clockColor : hexToRgba(state.dateColor, 0.35);
+                    ctx.lineWidth = isMajor ? 2.5 : 1.2;
+                    ctx.stroke();
+                }
+            }
+
+            for (let hr = 0; hr < totalTicks; hr++) {
+                const angle = ((hr / totalTicks) * 360 - 90) * (Math.PI / 180);
+                const labelRadius = radius - 30;
+                const lx = cx + Math.cos(angle) * labelRadius;
+                const ly = cy + Math.sin(angle) * labelRadius;
+                const labelNum = is24 ? String(hr).padStart(2, '0') : (hr === 0 ? '12' : String(hr));
+                if (!is24 || hr % 2 === 0) {
+                    ctx.fillText(labelNum, lx, ly);
+                }
+            }
+            ctx.restore();
+
+            // Hands
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+            const ms = now.getMilliseconds();
+
+            const secVal = seconds + (state.showMs ? ms / 1000 : 0);
+            const minVal = minutes + secVal / 60;
+            const hrVal = hours + minVal / 60;
+
+            const hourAngle = is24
+                ? ((hrVal / 24) * 360 - 90) * (Math.PI / 180)
+                : (((hrVal % 12) / 12) * 360 - 90) * (Math.PI / 180);
+            const minAngle = ((minVal / 60) * 360 - 90) * (Math.PI / 180);
+            const secAngle = ((secVal / 60) * 360 - 90) * (Math.PI / 180);
+
+            // Hour Hand
+            drawAnalogHand(ctx, cx, cy, hourAngle, radius * 0.52, 7, state.clockColor, 12);
+            // Minute Hand
+            drawAnalogHand(ctx, cx, cy, minAngle, radius * 0.74, 4.5, state.dateColor, 8);
+            // Second Hand
+            drawAnalogHand(ctx, cx, cy, secAngle, radius * 0.82, 2, '#ffffff', 6);
+
+            // Center Pin
+            ctx.beginPath();
+            ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+            ctx.fillStyle = state.clockColor;
+            ctx.fill();
+        }
+
+        function drawAnalogHand(ctx, cx, cy, angle, len, width, color, blur) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(cx - Math.cos(angle) * 14, cy - Math.sin(angle) * 14);
+            ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.lineCap = 'round';
+            if (!state.ecoMode) {
+                ctx.shadowColor = color;
+                ctx.shadowBlur = blur;
+            }
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        /**
+         * MODE: PROGRESS BARS
+         */
+        function updateProgress(now) {
+            const h = now.getHours();
+            const m = now.getMinutes();
+            const s = now.getSeconds();
+            const ms = now.getMilliseconds();
+
+            const daySec = h * 3600 + m * 60 + s + ms / 1000;
+            const dayPct = (daySec / 86400) * 100;
+            const hrPct = ((m * 60 + s + ms / 1000) / 3600) * 100;
+            const minPct = ((s + ms / 1000) / 60) * 100;
+            const secPct = (ms / 1000) * 100;
+
+            let dispH = h;
+            let suffix = '';
+            if (!state.use24Hour) {
+                suffix = h >= 12 ? ' PM' : ' AM';
+                dispH = h % 12 || 12;
+            }
+
+            progDayLabel.textContent = state.use24Hour ? 'DAY PROGRESS (24H)' : 'DAY PROGRESS (12H)';
+            progDayVal.textContent = `${String(dispH).padStart(2, '0')}:${String(m).padStart(2, '0')}${suffix} • ${dayPct.toFixed(1)}%`;
+            progDayBar.style.width = `${dayPct.toFixed(2)}%`;
+
+            progHourVal.textContent = `${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s • ${hrPct.toFixed(1)}%`;
+            progHourBar.style.width = `${hrPct.toFixed(2)}%`;
+
+            progMinVal.textContent = `${String(s).padStart(2, '0')}s • ${minPct.toFixed(0)}%`;
+            progMinBar.style.width = `${minPct.toFixed(2)}%`;
+
+            if (state.showSeconds || state.showMs) {
+                progSecRow.classList.remove('hidden');
+                progSecVal.textContent = `${String(ms).padStart(3, '0')}ms`;
+                progSecBar.style.width = `${secPct.toFixed(1)}%`;
+            } else {
+                progSecRow.classList.add('hidden');
+            }
+        }
+
+        /**
+         * MODE: SAND TIMER (Hourglass)
+         */
+        function drawSand(now) {
+            const ctx = sandCanvas.getContext('2d');
+            const w = sandCanvas.width;
+            const h = sandCanvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+
+            ctx.clearRect(0, 0, w, h);
+
+            const s = now.getSeconds();
+            const ms = now.getMilliseconds();
+            const progress = (s + ms / 1000) / 60; // 0.0 to 1.0
+
+            const topY = 40;
+            const botY = h - 40;
+            const halfW = 115;
+            const neckW = 9;
+
+            function traceBulb(c) {
+                c.beginPath();
+                c.moveTo(cx - halfW, topY);
+                c.lineTo(cx + halfW, topY);
+                c.bezierCurveTo(cx + halfW, cy - 28, cx + neckW, cy - 16, cx + neckW, cy);
+                c.bezierCurveTo(cx + neckW, cy + 16, cx + halfW, cy + 28, cx + halfW, botY);
+                c.lineTo(cx - halfW, botY);
+                c.bezierCurveTo(cx - halfW, cy + 28, cx - neckW, cy + 16, cx - neckW, cy);
+                c.bezierCurveTo(cx - neckW, cy - 16, cx - halfW, cy - 28, cx - halfW, topY);
+                c.closePath();
+            }
+
+            ctx.save();
+            traceBulb(ctx);
+            ctx.clip();
+
+            // Top Sand Draining
+            const topRemain = 1 - progress;
+            const topHeight = (cy - topY) - 8;
+            const sandTopY = cy - topHeight * Math.pow(topRemain, 0.65);
+            ctx.fillStyle = state.clockColor;
+            ctx.fillRect(cx - halfW, sandTopY, halfW * 2, cy - sandTopY);
+
+            // Falling Stream
+            ctx.strokeStyle = state.clockColor;
+            ctx.lineWidth = 2.5;
+            ctx.setLineDash([4, 4]);
+            ctx.lineDashOffset = -(ms * 0.05);
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx, botY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Bottom Sand Accumulating
+            const botHeight = (botY - cy) - 6;
+            const sandBotHeight = botHeight * Math.pow(progress, 0.72);
+            const sandBotY = botY - sandBotHeight;
+            ctx.beginPath();
+            ctx.moveTo(cx - halfW, botY);
+            ctx.lineTo(cx - halfW, sandBotY + 10);
+            ctx.quadraticCurveTo(cx, sandBotY - 10, cx + halfW, sandBotY + 10);
+            ctx.lineTo(cx + halfW, botY);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            // Glass outline
+            ctx.save();
+            traceBulb(ctx);
+            ctx.strokeStyle = state.clockColor;
+            ctx.lineWidth = 3.5;
+            if (!state.ecoMode) {
+                ctx.shadowColor = state.clockColor;
+                ctx.shadowBlur = 14;
+            }
+            ctx.stroke();
+
+            // Caps
+            ctx.fillStyle = state.clockColor;
+            ctx.fillRect(cx - halfW - 10, topY - 8, (halfW + 10) * 2, 8);
+            ctx.fillRect(cx - halfW - 10, botY, (halfW + 10) * 2, 8);
+            ctx.restore();
+
+            // Time Readout
+            let dispH = now.getHours();
+            let ampm = '';
+            if (!state.use24Hour) {
+                ampm = dispH >= 12 ? ' PM' : ' AM';
+                dispH = dispH % 12 || 12;
+            }
+            sandReadout.textContent = `${String(dispH).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(s).padStart(2, '0')}${ampm}`;
+        }
+
+        /**
+         * MODE: BINARY MATRIX (BCD)
+         * Standard Binary-Coded Decimal matrix: H1 H2 : M1 M2 (: S1 S2)
+         * 4 bits per column: 8, 4, 2, 1
+         */
+        function updateBinary(now) {
+            let rawH = now.getHours();
+            if (!state.use24Hour) {
+                rawH = rawH % 12 || 12;
+            }
+            const m = now.getMinutes();
+            const s = now.getSeconds();
+
+            const hStr = String(rawH).padStart(2, '0');
+            const mStr = String(m).padStart(2, '0');
+            const sStr = String(s).padStart(2, '0');
+
+            function updateCol(colId, digitChar) {
+                const col = document.getElementById(colId);
+                if (!col) return;
+                const val = parseInt(digitChar, 10);
+                const bits = col.querySelectorAll('.binary-bit');
+                [8, 4, 2, 1].forEach((weight, i) => {
+                    const isOn = (val & weight) !== 0;
+                    bits[i].classList.toggle('bit-on', isOn);
+                });
+                const valEl = col.querySelector('.binary-val');
+                if (valEl && valEl.textContent !== digitChar) {
+                    valEl.textContent = digitChar;
+                }
+            }
+
+            updateCol('bcol-h1', hStr[0]);
+            updateCol('bcol-h2', hStr[1]);
+            updateCol('bcol-m1', mStr[0]);
+            updateCol('bcol-m2', mStr[1]);
+
+            const secItems = document.querySelectorAll('.binary-sec-item');
+            if (state.showSeconds || state.showMs) {
+                secItems.forEach(el => el.classList.remove('hidden'));
+                updateCol('bcol-s1', sStr[0]);
+                updateCol('bcol-s2', sStr[1]);
+            } else {
+                secItems.forEach(el => el.classList.add('hidden'));
+            }
+        }
+
+        /**
+         * ACOUSTIC HOURLY CHIME (Web Audio API - 0 External Dependencies)
+         */
+        let audioCtx = null;
+        function getAudioContext() {
+            if (!audioCtx) {
+                const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioCtxClass) {
+                    audioCtx = new AudioCtxClass();
+                }
+            }
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            return audioCtx;
+        }
+
+        function playChime(type = state.hourlyChime) {
+            if (type === 'off') return;
+            const ctx = getAudioContext();
+            if (!ctx) return;
+
+            const t = ctx.currentTime;
+            if (type === 'bell') {
+                // Dual-tone harmonic acoustic bell
+                [587.33, 880].forEach((freq, idx) => {
+                    const startTime = t + idx * 0.16;
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, startTime);
+
+                    gain.gain.setValueAtTime(0, startTime);
+                    gain.gain.linearRampToValueAtTime(0.2, startTime + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 1.8);
+
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(startTime);
+                    osc.stop(startTime + 1.85);
+                });
+            } else if (type === 'beep') {
+                // Classic digital wristwatch dual-beep
+                [0, 0.12].forEach(offset => {
+                    const startTime = t + offset;
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(1760, startTime);
+
+                    gain.gain.setValueAtTime(0.08, startTime);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + 0.08);
+
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(startTime);
+                    osc.stop(startTime + 0.09);
+                });
+            }
+        }
+
+        /**
+         * MODE SWITCHING
+         */
+        function applyClockMode() {
+            viewDigital.classList.toggle('active', state.clockMode === 'digital');
+            viewAnalog.classList.toggle('active', state.clockMode === 'analog12' || state.clockMode === 'analog24');
+            viewProgress.classList.toggle('active', state.clockMode === 'progress');
+            viewSand.classList.toggle('active', state.clockMode === 'sand');
+            if (viewBinary) viewBinary.classList.toggle('active', state.clockMode === 'binary');
+
+            scheduleNextClockTick();
+        }
+
+        // ============================================================================
+        // [LANDMARK: JS_PROCEDURAL_BG_ENGINE]
+        // Zero-allocation canvas backgrounds (Stars, Matrix rain, Fire, Water, CRT Static)
+        // ============================================================================
+        /**
+         * LAZY PROCEDURAL BACKGROUND ENGINE (Zero Memory When Disabled)
+         */
+        let bgState = {
+            stars: [],
+            cols: [],
+            embers: [],
+            ripples: [],
+            phase: 0,
+            staticCanvas: null,
+            staticCtx: null,
+            staticImgData: null,
+            staticBuf32: null
+        };
+
+        function initBgCanvas() {
+            if (state.bgAnim === 'none' || state.isBlanked || state.ecoMode || document.visibilityState === 'hidden') {
+                bgCanvas.classList.remove('active');
+                bgCanvas.width = 0;
+                bgCanvas.height = 0;
+                bgCtx = null;
+                return;
+            }
+
+            bgCanvas.classList.add('active');
+            bgCanvas.width = window.innerWidth;
+            bgCanvas.height = window.innerHeight;
+            bgCtx = bgCanvas.getContext('2d');
+
+            const w = bgCanvas.width;
+            const h = bgCanvas.height;
+
+            // Lazy Particle / Buffer Allocation
+            if (state.bgAnim === 'stars') {
+                bgState.stars = Array.from({ length: 90 }, () => ({
+                    x: (Math.random() - 0.5) * w * 1.5,
+                    y: (Math.random() - 0.5) * h * 1.5,
+                    z: Math.random() * w
+                }));
+            } else if (state.bgAnim === 'matrix') {
+                const numCols = Math.ceil(w / 22);
+                bgState.cols = Array.from({ length: numCols }, () => Math.random() * -40);
+            } else if (state.bgAnim === 'fire') {
+                bgState.embers = Array.from({ length: 50 }, () => ({
+                    x: Math.random() * w,
+                    y: h + Math.random() * 50,
+                    r: 1.5 + Math.random() * 3.5,
+                    vy: 0.8 + Math.random() * 2,
+                    vx: (Math.random() - 0.5) * 0.8,
+                    alpha: 0.2 + Math.random() * 0.6
+                }));
+            } else if (state.bgAnim === 'water') {
+                bgState.ripples = Array.from({ length: 6 }, () => ({
+                    x: Math.random() * w,
+                    y: Math.random() * h,
+                    r: Math.random() * 120,
+                    maxR: 150 + Math.random() * 150,
+                    speed: 0.6 + Math.random() * 0.8
+                }));
+            } else if (state.bgAnim === 'static') {
+                const sc = document.createElement('canvas');
+                sc.width = 240;
+                sc.height = 135;
+                bgState.staticCanvas = sc;
+                bgState.staticCtx = sc.getContext('2d');
+                bgState.staticImgData = bgState.staticCtx.createImageData(240, 135);
+                bgState.staticBuf32 = new Uint32Array(bgState.staticImgData.data.buffer);
+            } else if (state.bgAnim === 'grid') {
+                bgState.gridOffset = 0;
+            }
+        }
+
+        function startBgLoop() {
+            if (state.bgRafId) {
+                cancelAnimationFrame(state.bgRafId);
+                state.bgRafId = null;
+            }
+
+            initBgCanvas();
+
+            if (state.bgAnim === 'none' || state.isBlanked || state.ecoMode || document.visibilityState === 'hidden') {
+                return;
+            }
+
+            let lastFrame = 0;
+            const interval = 48; // ~20 FPS keeps CPU and battery stone-cold
+
+            function render(ts) {
+                if (state.bgAnim === 'none' || state.isBlanked || state.ecoMode || document.visibilityState === 'hidden') {
+                    return;
+                }
+                if (ts - lastFrame >= interval) {
+                    renderBgFrame();
+                    lastFrame = ts;
+                }
+                state.bgRafId = requestAnimationFrame(render);
+            }
+            state.bgRafId = requestAnimationFrame(render);
+        }
+
+        function renderBgFrame() {
+            if (!bgCtx) return;
+            const w = bgCanvas.width;
+            const h = bgCanvas.height;
+            bgState.phase += 0.02;
+            const rgb = hexToRgb(state.clockColor);
+            const dateRgb = hexToRgb(state.dateColor);
+            const bgRgb = hexToRgb(state.bgColor);
+            const bgAccentRgb = hexToRgb(state.bgAccentColor);
+
+            switch (state.bgAnim) {
+                case 'matrix': {
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.2);
+                    bgCtx.fillRect(0, 0, w, h);
+                    bgCtx.font = '16px monospace';
+                    const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎ';
+                    for (let i = 0; i < bgState.cols.length; i++) {
+                        const ch = chars[Math.floor(Math.random() * chars.length)];
+                        const x = i * 22;
+                        const y = bgState.cols[i] * 20;
+                        // Coherent palette: Brighter lead glyph in Background Accent; trails in softer Background Accent
+                        if (Math.random() > 0.88) {
+                            bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.95)`;
+                        } else {
+                            bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.38)`;
+                        }
+                        bgCtx.fillText(ch, x, y);
+                        if (y > h && Math.random() > 0.96) {
+                            bgState.cols[i] = 0;
+                        } else {
+                            bgState.cols[i] += 0.75;
+                        }
+                    }
+                    break;
+                }
+
+                case 'stars': {
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.38);
+                    bgCtx.fillRect(0, 0, w, h);
+                    const cx = w / 2;
+                    const cy = h / 2;
+                    for (const s of bgState.stars) {
+                        s.z -= 4.2;
+                        if (s.z <= 1) {
+                            s.z = w;
+                            s.x = (Math.random() - 0.5) * w * 1.5;
+                            s.y = (Math.random() - 0.5) * h * 1.5;
+                        }
+                        const sx = cx + (s.x / s.z) * (w * 0.6);
+                        const sy = cy + (s.y / s.z) * (w * 0.6);
+                        const size = Math.max(0.6, (1 - s.z / w) * 3);
+                        const alpha = Math.max(0.15, 1 - s.z / w);
+                        
+                        // Starfield: Deep stars shimmer softly in bgAccent, closer stars in vivid bgAccent (no rogue white stars)
+                        const starAlpha = (s.z < w * 0.35) ? Math.min(1, alpha * 1.1) : (alpha * 0.65);
+                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${starAlpha.toFixed(2)})`;
+                        bgCtx.beginPath();
+                        bgCtx.arc(sx, sy, size, 0, Math.PI * 2);
+                        bgCtx.fill();
+                    }
+                    break;
+                }
+
+                case 'fire': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    const baseGrad = bgCtx.createLinearGradient(0, h * 0.5, 0, h);
+                    baseGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                    baseGrad.addColorStop(1, `rgba(${rgb.r}, ${Math.floor(rgb.g * 0.4)}, 10, 0.25)`);
+                    bgCtx.fillStyle = baseGrad;
+                    bgCtx.fillRect(0, 0, w, h);
+
+                    for (const p of bgState.embers) {
+                        p.y -= p.vy;
+                        p.x += p.vx + Math.sin(bgState.phase + p.y * 0.02) * 0.5;
+                        const life = Math.max(0, p.y / h);
+                        bgCtx.beginPath();
+                        bgCtx.arc(p.x, p.y, p.r * life + 0.5, 0, Math.PI * 2);
+                        bgCtx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${(p.alpha * life).toFixed(2)})`;
+                        bgCtx.fill();
+                        if (p.y < -10) {
+                            p.y = h + 15;
+                            p.x = Math.random() * w;
+                        }
+                    }
+                    break;
+                }
+
+                case 'water': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    for (const rp of bgState.ripples) {
+                        rp.r += rp.speed;
+                        const alpha = Math.max(0, (1 - rp.r / rp.maxR) * 0.25);
+                        bgCtx.beginPath();
+                        bgCtx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
+                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${alpha.toFixed(3)})`;
+                        bgCtx.lineWidth = 1.8;
+                        bgCtx.stroke();
+                        if (rp.r >= rp.maxR) {
+                            rp.r = 2;
+                            rp.x = Math.random() * w;
+                            rp.y = Math.random() * h;
+                        }
+                    }
+                    break;
+                }
+
+                case 'aurora': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    const x1 = w * (0.5 + 0.35 * Math.cos(bgState.phase * 0.6));
+                    const y1 = h * (0.5 + 0.35 * Math.sin(bgState.phase * 0.45));
+                    const g = bgCtx.createRadialGradient(x1, y1, 20, x1, y1, Math.max(w, h) * 0.6);
+                    g.addColorStop(0, hexToRgba(state.clockColor, 0.22));
+                    g.addColorStop(0.35, hexToRgba(state.bgAccentColor, 0.28));
+                    g.addColorStop(0.7, hexToRgba(state.dateColor, 0.09));
+                    g.addColorStop(1, 'rgba(0,0,0,0)');
+                    bgCtx.fillStyle = g;
+                    bgCtx.fillRect(0, 0, w, h);
+                    break;
+                }
+
+                case 'tod': {
+                    const now = new Date();
+                    const hr = now.getHours() + now.getMinutes() / 60;
+                    let topCol = '#010308', botCol = '#060c18';
+                    if (hr >= 5 && hr < 8) {
+                        topCol = '#120924'; botCol = '#3b1c32';
+                    } else if (hr >= 8 && hr < 17) {
+                        topCol = '#041428'; botCol = '#0b2b4c';
+                    } else if (hr >= 17 && hr < 20) {
+                        topCol = '#14071e'; botCol = '#331327';
+                    }
+                    const grad = bgCtx.createLinearGradient(0, 0, 0, h);
+                    grad.addColorStop(0, topCol);
+                    grad.addColorStop(1, botCol);
+                    bgCtx.fillStyle = grad;
+                    bgCtx.fillRect(0, 0, w, h);
+                    break;
+                }
+
+                case 'static': {
+                    if (!bgState.staticCanvas || !bgState.staticCtx || !bgState.staticBuf32) {
+                        initBgCanvas();
+                    }
+                    if (!bgState.staticCanvas) break;
+
+                    const scW = bgState.staticCanvas.width;
+                    const scH = bgState.staticCanvas.height;
+                    const buf = bgState.staticBuf32;
+                    const ar = bgAccentRgb.r, ag = bgAccentRgb.g, ab = bgAccentRgb.b;
+                    const br = bgRgb.r, bgVal = bgRgb.g, bb = bgRgb.b;
+
+                    // Direct Co-Rasterization: Scanlines and RF Snow occupy the exact same TVL pixel space
+                    let idx = 0;
+                    for (let y = 0; y < scH; y++) {
+                        const isScanline = (y % 2 === 1); // Alternating television raster lines
+                        for (let x = 0; x < scW; x++) {
+                            const n = Math.random();
+                            if (isScanline) {
+                                // TVL beam gap / shadow mask: dimmed phosphor floor
+                                const dim = n * 0.18;
+                                const r = (br + (ar - br) * dim) | 0;
+                                const g = (bgVal + (ag - bgVal) * dim) | 0;
+                                const b = (bb + (ab - bb) * dim) | 0;
+                                buf[idx++] = (255 << 24) | (b << 16) | (g << 8) | r;
+                            } else {
+                                // Active phosphor scanline: RF white/accent noise
+                                const intensity = n > 0.38 ? (n * 0.85) : (n * 0.25);
+                                const r = Math.min(255, (br + (ar - br) * intensity + (n > 0.86 ? 38 : 0))) | 0;
+                                const g = Math.min(255, (bgVal + (ag - bgVal) * intensity + (n > 0.86 ? 38 : 0))) | 0;
+                                const b = Math.min(255, (bb + (ab - bb) * intensity + (n > 0.86 ? 38 : 0))) | 0;
+                                buf[idx++] = (255 << 24) | (b << 16) | (g << 8) | r;
+                            }
+                        }
+                    }
+                    bgState.staticCtx.putImageData(bgState.staticImgData, 0, 0);
+
+                    bgCtx.clearRect(0, 0, w, h);
+                    bgCtx.imageSmoothingEnabled = false;
+                    bgCtx.drawImage(bgState.staticCanvas, 0, 0, w, h);
+
+                    // CRT Curved Phosphor Bulb Edge Vignette
+                    const vig = bgCtx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.36, w / 2, h / 2, Math.max(w, h) * 0.74);
+                    vig.addColorStop(0, 'rgba(0,0,0,0)');
+                    vig.addColorStop(1, 'rgba(0,0,0,0.65)');
+                    bgCtx.fillStyle = vig;
+                    bgCtx.fillRect(0, 0, w, h);
+                    break;
+                }
+
+                case 'grid': {
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.95);
+                    bgCtx.fillRect(0, 0, w, h);
+
+                    const horizonY = h * 0.44;
+                    bgState.gridOffset = ((bgState.gridOffset || 0) + 0.65) % 40;
+
+                    // Horizon glow using pure bgAccentColor (Palette Decoupled)
+                    const horizGrad = bgCtx.createLinearGradient(0, horizonY - 45, 0, horizonY + 25);
+                    horizGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                    horizGrad.addColorStop(0.65, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.42)`);
+                    horizGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                    bgCtx.fillStyle = horizGrad;
+                    bgCtx.fillRect(0, horizonY - 45, w, 70);
+
+                    bgCtx.save();
+                    bgCtx.beginPath();
+                    bgCtx.rect(0, horizonY, w, h - horizonY);
+                    bgCtx.clip();
+
+                    const cx = w / 2;
+                    // Fanning vertical perspective lines
+                    const numLines = Math.floor(w / 40) + 8;
+                    for (let i = -numLines; i <= numLines; i++) {
+                        const bottomX = cx + i * 95;
+                        bgCtx.beginPath();
+                        bgCtx.moveTo(cx, horizonY);
+                        bgCtx.lineTo(bottomX, h);
+                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.32)`;
+                        bgCtx.lineWidth = 1.3;
+                        bgCtx.stroke();
+                    }
+
+                    // Forward-moving horizontal grid lines with perspective compression
+                    const floorH = h - horizonY;
+                    for (let y = bgState.gridOffset; y < floorH; y += 32) {
+                        const ratio = Math.pow(y / floorH, 1.85);
+                        const py = horizonY + ratio * floorH;
+                        const lineAlpha = Math.min(0.65, ratio * 0.75);
+                        bgCtx.beginPath();
+                        bgCtx.moveTo(0, py);
+                        bgCtx.lineTo(w, py);
+                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${lineAlpha.toFixed(2)})`;
+                        bgCtx.lineWidth = 1.2;
+                        bgCtx.stroke();
+                    }
+                    bgCtx.restore();
+                    break;
+                }
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            if (state.bgAnim !== 'none') {
+                initBgCanvas();
+            }
+        });
+
+        /**
+         * ANTI-BURN-IN PIXEL DRIFT
+         */
+        function setupAntiBurnDrift() {
+            if (state.driftIntervalId) {
+                clearInterval(state.driftIntervalId);
+                state.driftIntervalId = null;
+            }
+            const root = document.documentElement;
+            if (!state.antiBurnDrift) {
+                root.style.setProperty('--drift-x', '0px');
+                root.style.setProperty('--drift-y', '0px');
+                return;
+            }
+            function step() {
+                const maxX = Math.min(window.innerWidth * 0.04, 40);
+                const maxY = Math.min(window.innerHeight * 0.04, 30);
+                const dx = Math.round((Math.random() * 2 - 1) * maxX);
+                const dy = Math.round((Math.random() * 2 - 1) * maxY);
+                root.style.setProperty('--drift-x', `${dx}px`);
+                root.style.setProperty('--drift-y', `${dy}px`);
+            }
+            step();
+            state.driftIntervalId = setInterval(step, 25000);
+        }
+
+        /**
+         * PANEL DE-ENERGIZER / BLANK SCREEN
+         */
+        function setBlankerActive(active, reason = 'Manual') {
+            state.isBlanked = active;
+            document.body.classList.toggle('blanker-active', active);
+
+            if (active) {
+                blankerOverlay.style.backgroundColor = state.blankColor;
+                stopAllSchedulers();
+                if (state.bgRafId) cancelAnimationFrame(state.bgRafId);
+                showToast('Display Sleeping • Click/Key to Wake');
+            } else {
+                scheduleNextClockTick();
+                startBgLoop();
+                if (reason === 'Wake') {
+                    showToast('Display Restored');
+                }
+            }
+        }
+
+        blankerOverlay.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.isBlanked) {
+                setBlankerActive(false, 'Wake');
+                resetIdleTimer();
+            }
+        });
+
+        /**
+         * TOAST HELPER
+         */
+        function showToast(message, isOk = true) {
+            toastText.textContent = message;
+            toastDot.style.backgroundColor = isOk ? '#2bd999' : '#f59e0b';
+            toastDot.style.boxShadow = `0 0 6px ${isOk ? '#2bd999' : '#f59e0b'}`;
+            toastEl.style.opacity = '1';
+            toastEl.style.transform = 'translateY(0)';
+
+            clearTimeout(state.toastTimer);
+            state.toastTimer = setTimeout(() => {
+                toastEl.style.opacity = '0';
+                toastEl.style.transform = 'translateY(-8px)';
+            }, 2400);
+        }
+
+        /**
+         * NATIVE SCREEN WAKE LOCK (0% CPU, OS Native Power Assertion)
+         */
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    if (!state.wakeLockSentinel) {
+                        state.wakeLockSentinel = await navigator.wakeLock.request('screen');
+                        state.wakeLockSentinel.addEventListener('release', () => {
+                            state.wakeLockSentinel = null;
+                        });
+                    }
+                } catch (err) {}
+            }
+        }
+
+        // Freeze all CPU execution when window is hidden / minimized
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                requestWakeLock();
+                scheduleNextClockTick();
+                startBgLoop();
+            } else {
+                stopAllSchedulers();
+                if (state.bgRafId) {
+                    cancelAnimationFrame(state.bgRafId);
+                    state.bgRafId = null;
+                }
+            }
+        });
+
+        /**
+         * FULLSCREEN
+         */
+        function isFullscreen() {
+            return !!(document.fullscreenElement || document.webkitFullscreenElement);
+        }
+
+        async function toggleFullscreen() {
+            try {
+                if (!isFullscreen()) {
+                    const docEl = document.documentElement;
+                    if (docEl.requestFullscreen) await docEl.requestFullscreen();
+                    else if (docEl.webkitRequestFullscreen) await docEl.webkitRequestFullscreen();
+                } else {
+                    if (document.exitFullscreen) await document.exitFullscreen();
+                    else if (document.webkitExitFullscreen) await document.webkitExitFullscreen();
+                }
+            } catch (e) {
+                showToast('Fullscreen restricted', false);
+            }
+        }
+
+        function updateFullscreenLabel() {
+            fullscreenBtn.textContent = isFullscreen() ? 'Exit fullscreen' : 'Enter fullscreen';
+        }
+        document.addEventListener('fullscreenchange', updateFullscreenLabel);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenLabel);
+
+        // ============================================================================
+        // [LANDMARK: JS_DRAWER_INTERACTIONS]
+        // Drawer state synchronization, UI button listeners, keyboard shortcuts
+        // ============================================================================
+        /**
+         * DRAWER SYNC & CONTROL WIRING
+         */
+        function syncDrawerUI() {
+            document.querySelectorAll('#clock-mode-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.mode === state.clockMode);
+            });
+            document.getElementById('opt-24h').classList.toggle('selected', state.use24Hour);
+            document.getElementById('opt-seconds').classList.toggle('selected', state.showSeconds);
+            document.getElementById('opt-ms').classList.toggle('selected', state.showMs);
+            document.getElementById('opt-blink').classList.toggle('selected', state.blinkColon);
+            // Slashed zero indicator & OpenType capability detection
+            const slashBtn = document.getElementById('opt-slash-zero');
+            const hasOpenTypeSlash = state.fontFamily.includes('Orbitron') || 
+                                     state.fontFamily.includes('JetBrains') || 
+                                     state.fontFamily.includes('Share Tech') || 
+                                     state.fontFamily.includes('Inter');
+            if (slashBtn) {
+                slashBtn.classList.toggle('selected', state.slashedZero && hasOpenTypeSlash);
+                if (hasOpenTypeSlash) {
+                    slashBtn.textContent = state.slashedZero ? 'Slashed Ø (Alt)' : 'Standard 0';
+                    slashBtn.title = 'OpenType alternate zero glyph: Toggles between slashed Ø and open 0';
+                    slashBtn.style.opacity = '1';
+                } else {
+                    slashBtn.textContent = 'Zero (Default)';
+                    slashBtn.title = 'This font lacks an OpenType alternate zero table and uses its intrinsic glyph design';
+                    slashBtn.style.opacity = '0.65';
+                }
+            }
+            document.getElementById('opt-drift').classList.toggle('selected', state.antiBurnDrift);
+
+            const ecoBtn = document.getElementById('opt-eco-governor');
+            if (ecoBtn) ecoBtn.classList.toggle('selected', state.ecoMode);
+
+            document.querySelectorAll('#date-format-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.datefmt === state.dateFormat);
+            });
+            document.querySelectorAll('#bg-anim-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.bg === state.bgAnim);
+            });
+            document.querySelectorAll('#theme-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.theme === state.theme);
+            });
+            document.querySelectorAll('#font-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.font === state.fontFamily);
+            });
+            document.querySelectorAll('#chime-group .opt-pill[data-chime]').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.chime === state.hourlyChime);
+            });
+
+            document.getElementById('auto-blank-select').value = String(state.autoBlankMinutes);
+        }
+
+        function toggleDrawer(force) {
+            state.drawerOpen = force !== undefined ? force : !state.drawerOpen;
+            settingsDrawer.classList.toggle('drawer-closed', !state.drawerOpen);
+            document.getElementById('customize-btn').classList.toggle('active-pill', state.drawerOpen);
+            resetIdleTimer();
+        }
+
+        document.getElementById('customize-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleDrawer();
+        });
+
+        document.getElementById('close-drawer-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleDrawer(false);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (state.drawerOpen && !settingsDrawer.contains(e.target) && !document.getElementById('customize-btn').contains(e.target)) {
+                toggleDrawer(false);
+            }
+        });
+
+        // Mode switch
+        document.querySelectorAll('#clock-mode-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const chosenMode = btn.dataset.mode;
+                if (state.ecoMode && chosenMode !== 'digital') {
+                    state.ecoMode = false;
+                    state.preEcoSnapshot = null;
+                    document.body.classList.remove('eco-governor');
+                }
+                state.clockMode = chosenMode;
+                syncDrawerUI();
+                applyClockMode();
+                scheduleNextClockTick();
+                savePreferences();
+                showToast(`Mode: ${btn.textContent}`);
+            });
+        });
+
+        // 24h
+        document.getElementById('opt-24h').addEventListener('click', () => {
+            state.use24Hour = !state.use24Hour;
+            syncDrawerUI();
+            applyVisuals();
+            updateClock(true);
+            savePreferences();
+            showToast(state.use24Hour ? '24-Hour Format' : '12-Hour Format');
+        });
+
+        // Seconds
+        document.getElementById('opt-seconds').addEventListener('click', () => {
+            if (state.ecoMode) {
+                state.ecoMode = false;
+                state.preEcoSnapshot = null;
+                document.body.classList.remove('eco-governor');
+                state.showSeconds = true;
+            } else {
+                state.showSeconds = !state.showSeconds;
+            }
+            if (!state.showSeconds) state.showMs = false;
+            syncDrawerUI();
+            scheduleNextClockTick();
+            savePreferences();
+            showToast(state.showSeconds ? 'Seconds Enabled' : 'Seconds Hidden (Zero-Idle)');
+        });
+
+        // Milliseconds
+        document.getElementById('opt-ms').addEventListener('click', () => {
+            if (state.ecoMode) {
+                state.ecoMode = false;
+                state.preEcoSnapshot = null;
+                document.body.classList.remove('eco-governor');
+                state.showMs = true;
+                state.showSeconds = true;
+            } else {
+                state.showMs = !state.showMs;
+                if (state.showMs) state.showSeconds = true;
+            }
+            syncDrawerUI();
+            scheduleNextClockTick();
+            savePreferences();
+            showToast(state.showMs ? 'Milliseconds Active (30 Hz)' : 'Milliseconds Disabled');
+        });
+
+        // Eco Governor Drawer Toggle
+        document.getElementById('opt-eco-governor').addEventListener('click', () => {
+            setEcoMode(!state.ecoMode);
+        });
+
+        // Blink Colon
+        document.getElementById('opt-blink').addEventListener('click', () => {
+            if (state.ecoMode) {
+                state.ecoMode = false;
+                state.preEcoSnapshot = null;
+                document.body.classList.remove('eco-governor');
+                state.blinkColon = true;
+            } else {
+                state.blinkColon = !state.blinkColon;
+            }
+            syncDrawerUI();
+            scheduleNextClockTick();
+            savePreferences();
+            showToast(state.blinkColon ? 'Blinking Colon' : 'Solid Colon');
+        });
+
+        // Slashed Zero
+        document.getElementById('opt-slash-zero').addEventListener('click', () => {
+            const hasOpenTypeSlash = state.fontFamily.includes('Orbitron') || 
+                                     state.fontFamily.includes('JetBrains') || 
+                                     state.fontFamily.includes('Share Tech') || 
+                                     state.fontFamily.includes('Inter');
+            if (!hasOpenTypeSlash) {
+                showToast('Current font uses intrinsic zero glyphs (No OpenType alternate)');
+                return;
+            }
+            state.slashedZero = !state.slashedZero;
+            applyVisuals();
+            syncDrawerUI();
+            savePreferences();
+            showToast(state.slashedZero ? 'OpenType Slashed Ø On' : 'Standard 0');
+        });
+
+        // Anti-Burn Drift
+        document.getElementById('opt-drift').addEventListener('click', () => {
+            state.antiBurnDrift = !state.antiBurnDrift;
+            setupAntiBurnDrift();
+            syncDrawerUI();
+            savePreferences();
+            showToast(state.antiBurnDrift ? 'Pixel Shift Active' : 'Pixel Shift Off');
+        });
+
+        // Date formats
+        document.querySelectorAll('#date-format-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.dateFormat = btn.dataset.datefmt;
+                syncDrawerUI();
+                updateClock(true);
+                savePreferences();
+                showToast('Date Format Updated');
+            });
+        });
+
+        // Backgrounds
+        document.querySelectorAll('#bg-anim-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const chosen = btn.dataset.bg;
+                if (state.ecoMode && chosen !== 'none') {
+                    state.ecoMode = false;
+                    state.preEcoSnapshot = null;
+                    document.body.classList.remove('eco-governor');
+                }
+                state.bgAnim = chosen;
+                applyVisuals();
+                syncDrawerUI();
+                startBgLoop();
+                scheduleNextClockTick();
+                savePreferences();
+                showToast(`Background: ${btn.textContent}`);
+            });
+        });
+
+        // Themes
+        document.querySelectorAll('#theme-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const key = btn.dataset.theme;
+                const p = THEMES[key];
+                if (p) {
+                    state.theme = key;
+                    state.clockColor = p.clock;
+                    state.dateColor = p.date;
+                    state.bgColor = p.bg;
+                    state.bgAccentColor = p.bgAccent || '#072116';
+                    applyVisuals();
+                    syncDrawerUI();
+                    updateClock(true);
+                    savePreferences();
+                    showToast(`Theme: ${p.name}`);
+                }
+            });
+        });
+
+        // Custom Colors: Clock, Date, Backdrop, Backdrop Accent
+        document.getElementById('custom-clock-color').addEventListener('input', (e) => {
+            state.theme = 'custom';
+            state.clockColor = e.target.value;
+            applyVisuals();
+            syncDrawerUI();
+            updateClock(true);
+            savePreferences();
+        });
+
+        document.getElementById('custom-date-color').addEventListener('input', (e) => {
+            state.theme = 'custom';
+            state.dateColor = e.target.value;
+            applyVisuals();
+            syncDrawerUI();
+            updateClock(true);
+            savePreferences();
+        });
+
+        document.getElementById('custom-bg-color').addEventListener('input', (e) => {
+            state.theme = 'custom';
+            state.bgColor = e.target.value;
+            applyVisuals();
+            syncDrawerUI();
+            updateClock(true);
+            savePreferences();
+        });
+
+        document.getElementById('custom-bg-accent-color').addEventListener('input', (e) => {
+            state.theme = 'custom';
+            state.bgAccentColor = e.target.value;
+            applyVisuals();
+            syncDrawerUI();
+            updateClock(true);
+            savePreferences();
+        });
+
+        // Fonts
+        document.querySelectorAll('#font-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.fontFamily = btn.dataset.font;
+                applyVisuals();
+                syncDrawerUI();
+                updateClock(true);
+                savePreferences();
+                showToast(`Font: ${btn.textContent}`);
+            });
+        });
+
+        // Hourly Chime pills
+        document.querySelectorAll('#chime-group .opt-pill[data-chime]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.hourlyChime = btn.dataset.chime;
+                syncDrawerUI();
+                savePreferences();
+                showToast(state.hourlyChime === 'off' ? 'Hourly Chime Off' : `Hourly Chime: ${btn.textContent}`);
+            });
+        });
+
+        document.getElementById('test-chime-btn').addEventListener('click', () => {
+            const previewType = state.hourlyChime === 'off' ? 'bell' : state.hourlyChime;
+            playChime(previewType);
+            showToast(`Chime Preview (${previewType.toUpperCase()})`);
+        });
+
+        // Shortcuts Modal
+        function toggleShortcuts(force) {
+            state.shortcutsOpen = force !== undefined ? force : !state.shortcutsOpen;
+            if (shortcutsModal) {
+                shortcutsModal.classList.toggle('modal-active', state.shortcutsOpen);
+            }
+            resetIdleTimer();
+        }
+
+        const shortcutsBtn = document.getElementById('shortcuts-btn');
+        if (shortcutsBtn) {
+            shortcutsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleShortcuts();
+            });
+        }
+
+        const closeShortcutsBtn = document.getElementById('close-shortcuts-btn');
+        if (closeShortcutsBtn) {
+            closeShortcutsBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleShortcuts(false);
+            });
+        }
+
+        if (shortcutsModal) {
+            shortcutsModal.addEventListener('click', (e) => {
+                if (e.target === shortcutsModal) {
+                    toggleShortcuts(false);
+                }
+            });
+        }
+
+        // Theme cycle helper
+        function cycleTheme() {
+            const keys = Object.keys(THEMES);
+            const currentIdx = keys.indexOf(state.theme);
+            const nextKey = keys[(currentIdx + 1) % keys.length];
+            const p = THEMES[nextKey];
+            if (p) {
+                state.theme = nextKey;
+                state.clockColor = p.clock;
+                state.dateColor = p.date;
+                state.bgColor = p.bg;
+                state.bgAccentColor = p.bgAccent || '#072116';
+                applyVisuals();
+                syncDrawerUI();
+                updateClock(true);
+                savePreferences();
+                showToast(`Theme: ${p.name}`);
+            }
+        }
+
+        // Mode switch helper for keys 1-6
+        const MODES_LIST = ['digital', 'analog12', 'analog24', 'progress', 'sand', 'binary'];
+        function switchModeByIndex(index) {
+            const chosen = MODES_LIST[index];
+            if (!chosen) return;
+            if (state.ecoMode && chosen !== 'digital') {
+                state.ecoMode = false;
+                state.preEcoSnapshot = null;
+                document.body.classList.remove('eco-governor');
+            }
+            state.clockMode = chosen;
+            syncDrawerUI();
+            applyClockMode();
+            scheduleNextClockTick();
+            savePreferences();
+            showToast(`Mode: ${chosen.toUpperCase()}`);
+        }
+
+        // Blanker buttons
+        document.getElementById('blanker-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            setBlankerActive(true);
+        });
+
+        document.getElementById('drawer-blank-now-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleDrawer(false);
+            setBlankerActive(true);
+        });
+
+        document.querySelectorAll('.blank-swatch').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.blankColor = btn.dataset.color;
+                applyVisuals();
+                savePreferences();
+                showToast(`Blank Tint: ${state.blankColor}`);
+            });
+        });
+
+        document.getElementById('auto-blank-select').addEventListener('change', (e) => {
+            state.autoBlankMinutes = parseInt(e.target.value, 10) || 0;
+            savePreferences();
+            resetIdleTimer();
+            showToast(state.autoBlankMinutes > 0 ? `Auto-Blank after ${state.autoBlankMinutes}m` : 'Auto-Blank Off');
+        });
+
+        // Control Bar actions
+        formatBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.use24Hour = !state.use24Hour;
+            syncDrawerUI();
+            applyVisuals();
+            updateClock(true);
+            savePreferences();
+            showToast(state.use24Hour ? '24-Hour Format' : '12-Hour Format');
+        });
+
+        fullscreenBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleFullscreen();
+        });
+
+        document.getElementById('brightness-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.brightnessIndex = (state.brightnessIndex + 1) % state.brightnessLevels.length;
+            applyVisuals();
+            savePreferences();
+            const pct = Math.round(state.brightnessLevels[state.brightnessIndex] * 100);
+            showToast(`Brightness: ${pct}%`);
+        });
+
+        document.getElementById('zoom-out-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.zoomPercent > 60) {
+                state.zoomPercent -= 20;
+                applyVisuals();
+                savePreferences();
+            }
+        });
+
+        document.getElementById('zoom-in-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.zoomPercent < 300) {
+                state.zoomPercent += 20;
+                applyVisuals();
+                savePreferences();
+            }
+        });
+
+        document.getElementById('reset-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.zoomPercent = 200;
+            state.brightnessIndex = 0;
+            state.clockMode = 'digital';
+            state.bgAnim = 'none';
+            state.theme = 'emerald';
+            state.clockColor = THEMES.emerald.clock;
+            state.dateColor = THEMES.emerald.date;
+            state.bgColor = THEMES.emerald.bg;
+            state.bgAccentColor = THEMES.emerald.bgAccent;
+            state.fontFamily = "'Orbitron', sans-serif";
+            state.showSeconds = false;
+            state.showMs = false;
+            state.ecoMode = false;
+            state.preEcoSnapshot = null;
+            state.hourlyChime = 'off';
+            applyVisuals();
+            syncDrawerUI();
+            applyClockMode();
+            startBgLoop();
+            savePreferences();
+            showToast('Reset to Default View');
+        });
+
+        // Eco Toggle via badge click
+        ecoBadge.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setEcoMode(!state.ecoMode);
+        });
+
+        // Double click screen toggles fullscreen
+        document.body.addEventListener('dblclick', (e) => {
+            if (!e.target.closest('nav') && !e.target.closest('aside') && !e.target.closest('#shortcuts-modal') && !state.isBlanked) {
+                toggleFullscreen();
+            }
+        });
+
+        /**
+         * EXTENDED KEYBOARD SHORTCUTS
+         */
+        window.addEventListener('keydown', (e) => {
+            if (state.isBlanked) {
+                e.preventDefault();
+                setBlankerActive(false, 'Wake');
+                resetIdleTimer();
+                return;
+            }
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+            const key = e.key.toLowerCase();
+            if (key === 'b') {
+                setBlankerActive(true);
+            } else if (key === 'c') {
+                toggleDrawer();
+            } else if (key === 'f') {
+                toggleFullscreen();
+            } else if (key === 'e') {
+                setEcoMode(!state.ecoMode);
+            } else if (key === 't') {
+                cycleTheme();
+            } else if (key === '?' || key === '/') {
+                if (e.shiftKey || key === '?') {
+                    toggleShortcuts();
+                }
+            } else if (key === 'h' && !e.ctrlKey && !e.metaKey) {
+                state.use24Hour = !state.use24Hour;
+                syncDrawerUI();
+                applyVisuals();
+                updateClock(true);
+                savePreferences();
+                showToast(state.use24Hour ? '24-Hour Format' : '12-Hour Format');
+            } else if (key === 'm') {
+                const modes = ['off', 'bell', 'beep'];
+                const nextChime = modes[(modes.indexOf(state.hourlyChime) + 1) % modes.length];
+                state.hourlyChime = nextChime;
+                syncDrawerUI();
+                savePreferences();
+                if (nextChime !== 'off') playChime(nextChime);
+                showToast(`Hourly Chime: ${nextChime.toUpperCase()}`);
+            } else if (['1','2','3','4','5','6'].includes(key)) {
+                switchModeByIndex(parseInt(key, 10) - 1);
+            } else if (key === '+' || key === '=') {
+                if (state.zoomPercent < 300) {
+                    state.zoomPercent += 20;
+                    applyVisuals();
+                    savePreferences();
+                }
+            } else if (key === '-' || key === '_') {
+                if (state.zoomPercent > 60) {
+                    state.zoomPercent -= 20;
+                    applyVisuals();
+                    savePreferences();
+                }
+            } else if (key === '0') {
+                state.zoomPercent = 200;
+                applyVisuals();
+                savePreferences();
+                showToast('Zoom Reset: 200%');
+            } else if (key === 'escape') {
+                if (state.shortcutsOpen) toggleShortcuts(false);
+                if (state.drawerOpen) toggleDrawer(false);
+            }
+        });
+
+        // Instant resynchronization on window focus / network resume (e.g. laptop lid open)
+        window.addEventListener('focus', () => {
+            updateClock(true);
+            scheduleNextClockTick();
+        });
+        window.addEventListener('online', () => {
+            updateClock(true);
+            scheduleNextClockTick();
+        });
+
+        /**
+         * THROTTLED IDLE TIMER
+         */
+        let mouseThrottle = false;
+        function resetIdleTimer() {
+            document.body.classList.remove('user-idle');
+            clearTimeout(state.idleTimer);
+            state.idleTimer = setTimeout(() => {
+                if (!state.drawerOpen) {
+                    document.body.classList.add('user-idle');
+                }
+            }, 3500);
+
+            clearTimeout(state.autoBlankTimer);
+            if (state.autoBlankMinutes > 0 && !state.isBlanked) {
+                state.autoBlankTimer = setTimeout(() => {
+                    setBlankerActive(true, 'AutoIdle');
+                }, state.autoBlankMinutes * 60 * 1000);
+            }
+        }
+
+        window.addEventListener('mousemove', () => {
+            if (!mouseThrottle) {
+                mouseThrottle = true;
+                requestAnimationFrame(() => {
+                    resetIdleTimer();
+                    requestWakeLock();
+                    mouseThrottle = false;
+                });
+            }
+        }, { passive: true });
+
+        ['mousedown', 'touchstart', 'keydown'].forEach(evt => {
+            window.addEventListener(evt, () => {
+                resetIdleTimer();
+                requestWakeLock();
+            }, { passive: true });
+        });
+
+        /**
+         * BOOTSTRAP ON LOAD (Safe for all execution environments)
+         */
+        function initApp() {
+            loadPreferences();
+            applyVisuals();
+            syncDrawerUI();
+            applyClockMode();
+            setupAntiBurnDrift();
+            startBgLoop();
+            requestWakeLock();
+            resetIdleTimer();
+            showToast('Clockity 3 • On-Demand Ready');
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initApp);
+        } else {
+            initApp();
+        }
+    </script>
+</body>
+</html>

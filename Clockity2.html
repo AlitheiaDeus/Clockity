@@ -1,0 +1,2204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Clockity — Full Screen Ambient Clock & Panel Keep-Awake</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Orbitron, Inter, JetBrains Mono, Share Tech Mono, Cinzel, Silkscreen -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@400;500;600;800&family=JetBrains+Mono:wght@400;600;800&family=Orbitron:wght@400;500;700;900&family=Share+Tech+Mono&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --clock-color: #2bd999;
+            --date-color: #24b880;
+            --bg-color: #000000;
+            --glow-primary: rgba(43, 217, 153, 0.55);
+            --glow-secondary: rgba(43, 217, 153, 0.25);
+            --clock-font: 'Orbitron', sans-serif;
+            --zoom-scale: 1;
+            --brightness: 1;
+            --drift-x: 0px;
+            --drift-y: 0px;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            overflow: hidden;
+            font-family: var(--clock-font);
+            cursor: default;
+            transition: background-color 0.4s ease;
+        }
+
+        /* Hide cursor when idle or when screen blanker is active */
+        body.user-idle,
+        body.blanker-active {
+            cursor: none;
+        }
+
+        /* Background Canvas for Procedural Animations */
+        #bg-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+            filter: brightness(var(--brightness));
+            transition: opacity 0.5s ease, filter 0.3s ease;
+        }
+
+        /* Main wrapper scales smoothly with zoom controls & anti-burn-in drift */
+        #clock-wrapper {
+            position: relative;
+            z-index: 10;
+            transform: translate3d(var(--drift-x), var(--drift-y), 0) scale(var(--zoom-scale));
+            filter: brightness(var(--brightness));
+            transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease;
+            transform-origin: center center;
+            will-change: transform, filter;
+        }
+
+        /* Main Time Display */
+        .clock-digits {
+            color: var(--clock-color);
+            font-family: var(--clock-font);
+            font-weight: 900;
+            font-size: clamp(3.2rem, 19.5vw, 24rem);
+            line-height: 0.92;
+            letter-spacing: 0.02em;
+            text-shadow: 
+                0 0 28px var(--glow-primary),
+                0 0 65px var(--glow-secondary);
+            font-variant-numeric: tabular-nums slashed-zero;
+            display: flex;
+            align-items: baseline;
+            justify-content: center;
+        }
+
+        .clock-digits.with-seconds {
+            font-size: clamp(2.4rem, 13.8vw, 17rem);
+        }
+
+        .clock-digits.with-ms {
+            font-size: clamp(2rem, 11.2vw, 13.5rem);
+        }
+
+        /* Guaranteed crisp diagonal slash on Every Zero ('0') in the main clock */
+        .zero-char {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        body.slashed-zero-on .zero-char::after {
+            content: "";
+            position: absolute;
+            width: 74%;
+            height: 13.5%;
+            background-color: var(--clock-color);
+            transform: rotate(-41deg);
+            border-radius: 2px;
+            pointer-events: none;
+            box-shadow: 0 0 8px var(--glow-primary);
+        }
+
+        /* Guaranteed crisp diagonal slash on Every Zero ('0') in the date display */
+        .date-zero-char {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        body.slashed-zero-on .date-zero-char::after {
+            content: "";
+            position: absolute;
+            width: 78%;
+            height: 8.5%;
+            background-color: var(--date-color);
+            transform: rotate(-42deg);
+            border-radius: 1px;
+            pointer-events: none;
+        }
+
+        /* Square-dot colon styling */
+        .colon-char {
+            display: inline-flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 0.54em;
+            margin: 0 0.06em;
+            transform: translateY(-0.08em);
+            transition: opacity 0.15s ease;
+        }
+
+        .colon-char.colon-dim {
+            opacity: 0.18;
+        }
+
+        .colon-dot {
+            width: 0.135em;
+            height: 0.135em;
+            background-color: var(--clock-color);
+            border-radius: 0.015em;
+            box-shadow: 
+                0 0 22px var(--glow-primary),
+                0 0 45px var(--glow-secondary);
+        }
+
+        /* Seconds & Milliseconds sub-digits */
+        .seconds-block {
+            display: inline-flex;
+            align-items: baseline;
+        }
+
+        .ms-badge {
+            font-size: 0.34em;
+            font-weight: 700;
+            color: var(--date-color);
+            margin-left: 0.12em;
+            min-width: 2.3em;
+            text-align: left;
+            opacity: 0.9;
+            text-shadow: 0 0 14px var(--glow-secondary);
+        }
+
+        /* AM/PM indicator when in 12h mode */
+        .ampm-badge {
+            font-size: 0.16em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin-left: 0.4em;
+            align-self: flex-end;
+            margin-bottom: 0.45em;
+            color: var(--date-color);
+            text-shadow: 0 0 15px var(--glow-secondary);
+        }
+
+        /* Date Display */
+        .date-display {
+            color: var(--date-color);
+            font-family: var(--clock-font);
+            font-weight: 400;
+            font-size: clamp(0.85rem, 3.1vw, 3.3rem);
+            letter-spacing: 0.035em;
+            margin-top: clamp(0.75rem, 2.6vw, 2.75rem);
+            text-shadow: 0 0 14px var(--glow-secondary);
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        /* Bottom Right Minimalist Controls matching original Clockity */
+        .control-bar {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            transition: opacity 0.45s ease, transform 0.45s ease;
+        }
+
+        body.user-idle .control-bar,
+        body.blanker-active .control-bar {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .ctrl-btn {
+            color: #b0b0b0;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+            transition: color 0.15s ease, transform 0.1s ease, background-color 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            background: transparent;
+            border: none;
+            padding: 6px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .ctrl-btn:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.09);
+        }
+
+        .ctrl-btn:active {
+            transform: scale(0.95);
+        }
+
+        .ctrl-btn.active-pill {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.14);
+        }
+
+        /* Settings Drawer */
+        #settings-drawer {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        #settings-drawer.drawer-closed {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(12px) scale(0.98);
+        }
+
+        /* Custom subtle scrollbars for settings drawer */
+        #settings-drawer::-webkit-scrollbar {
+            width: 5px;
+        }
+        #settings-drawer::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        #settings-drawer::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.18);
+            border-radius: 9999px;
+        }
+
+        /* Subtle toast notification for status feedback */
+        #status-toast {
+            font-family: 'Inter', sans-serif;
+            transition: opacity 0.35s ease, transform 0.35s ease;
+        }
+
+        /* Panel De-Energizer / Screen Blanker Overlay */
+        #blanker-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            background-color: #000000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.55s ease, background-color 0.4s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        body.blanker-active #blanker-overlay {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* Progress Bar glow fill */
+        .progress-glow {
+            background-color: var(--clock-color);
+            box-shadow: 0 0 18px var(--glow-primary), 0 0 35px var(--glow-secondary);
+            transition: width 0.15s linear;
+        }
+
+        /* Pill option buttons inside drawer */
+        .opt-pill {
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.03);
+            color: #d4d4d8;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+        }
+
+        .opt-pill:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+        }
+
+        .opt-pill.selected {
+            border-color: var(--clock-color);
+            background: rgba(255, 255, 255, 0.11);
+            color: #ffffff;
+            box-shadow: 0 0 12px var(--glow-secondary);
+        }
+    </style>
+</head>
+<body class="slashed-zero-on relative flex items-center justify-center w-screen h-screen overflow-hidden">
+
+    <!-- Procedural Animated Background Canvas (0 KB external assets, ultra-low CPU) -->
+    <canvas id="bg-canvas"></canvas>
+
+    <!-- Panel De-Energizer / Screen Blanker Overlay (Keeps WakeLock active while de-energizing LCD pixels) -->
+    <div id="blanker-overlay" title="Click or press any key to wake display">
+        <div id="blanker-hint" class="text-zinc-700 text-xs font-sans tracking-widest uppercase transition-opacity duration-700 opacity-0">
+            Panel De-Energized • Wake Lock Active • Click or Press Key to Restore
+        </div>
+    </div>
+
+    <!-- Subtle Status Toast (top-right, auto-hides) -->
+    <div id="status-toast" class="fixed top-5 right-6 z-40 pointer-events-none opacity-0 transform -translate-y-2 bg-zinc-900/90 border border-zinc-800 text-zinc-200 text-xs px-3.5 py-1.5 rounded-full flex items-center gap-2 shadow-lg">
+        <span id="wake-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span id="toast-text">No Sleep Active</span>
+    </div>
+
+    <!-- Main Centered Clock & Date Container -->
+    <main id="clock-wrapper" class="flex flex-col items-center justify-center px-4 text-center select-none w-full max-w-[96vw]">
+        
+        <!-- MODE 1: DIGITAL CLOCK (Default) -->
+        <div id="view-digital" class="flex flex-col items-center justify-center">
+            <div id="time-container" class="clock-digits" aria-live="polite">
+                <span id="hours-text">02</span>
+                <span id="main-colon" class="colon-char" aria-hidden="true">
+                    <span class="colon-dot"></span>
+                    <span class="colon-dot"></span>
+                </span>
+                <span id="minutes-text">08</span>
+                
+                <!-- Optional Seconds (:SS) -->
+                <span id="seconds-wrapper" class="seconds-block hidden">
+                    <span id="sec-colon" class="colon-char" aria-hidden="true">
+                        <span class="colon-dot"></span>
+                        <span class="colon-dot"></span>
+                    </span>
+                    <span id="seconds-text">00</span>
+                </span>
+
+                <!-- Optional Milliseconds (.mmm) -->
+                <span id="ms-text" class="ms-badge hidden">.000</span>
+
+                <!-- AM/PM Badge -->
+                <span id="ampm-text" class="ampm-badge hidden">AM</span>
+            </div>
+        </div>
+
+        <!-- MODE 2 & 3: ANALOG CLOCK (12-Hour Standard OR 24-Hour Single-Rotation "Confusing" Dial) -->
+        <div id="view-analog" class="hidden flex-col items-center justify-center">
+            <div class="relative flex items-center justify-center">
+                <canvas id="analog-canvas" width="520" height="520" class="w-[min(68vw,56vh)] h-[min(68vw,56vh)] max-w-[500px] max-h-[500px]"></canvas>
+            </div>
+        </div>
+
+        <!-- MODE 4: PROGRESS BARS CLOCK -->
+        <div id="view-progress" class="hidden flex-col items-center justify-center w-[min(84vw,760px)] gap-5 py-2">
+            <!-- Day Progress -->
+            <div class="w-full">
+                <div class="flex justify-between items-baseline mb-1.5 text-sm sm:text-base font-bold tracking-wider" style="color: var(--clock-color)">
+                    <span id="prog-day-label">DAY (24H)</span>
+                    <span id="prog-day-val">00:00 • 0.0%</span>
+                </div>
+                <div class="w-full h-4 sm:h-5 rounded-full bg-white/10 overflow-hidden p-0.5 border border-white/10">
+                    <div id="prog-day-bar" class="h-full rounded-full progress-glow" style="width: 50%"></div>
+                </div>
+            </div>
+            <!-- Hour Progress -->
+            <div class="w-full">
+                <div class="flex justify-between items-baseline mb-1.5 text-sm sm:text-base font-bold tracking-wider" style="color: var(--clock-color)">
+                    <span>HOUR (60M)</span>
+                    <span id="prog-hour-val">00m • 0%</span>
+                </div>
+                <div class="w-full h-4 sm:h-5 rounded-full bg-white/10 overflow-hidden p-0.5 border border-white/10">
+                    <div id="prog-hour-bar" class="h-full rounded-full progress-glow" style="width: 30%"></div>
+                </div>
+            </div>
+            <!-- Minute Progress -->
+            <div class="w-full">
+                <div class="flex justify-between items-baseline mb-1.5 text-sm sm:text-base font-bold tracking-wider" style="color: var(--clock-color)">
+                    <span>MINUTE (60S)</span>
+                    <span id="prog-min-val">00s • 0%</span>
+                </div>
+                <div class="w-full h-4 sm:h-5 rounded-full bg-white/10 overflow-hidden p-0.5 border border-white/10">
+                    <div id="prog-min-bar" class="h-full rounded-full progress-glow" style="width: 75%"></div>
+                </div>
+            </div>
+            <!-- Second Progress (visible when seconds or ms enabled) -->
+            <div id="prog-sec-row" class="w-full hidden">
+                <div class="flex justify-between items-baseline mb-1.5 text-xs sm:text-sm font-bold tracking-wider" style="color: var(--date-color)">
+                    <span>SECOND (1000MS)</span>
+                    <span id="prog-sec-val">000ms</span>
+                </div>
+                <div class="w-full h-2.5 rounded-full bg-white/10 overflow-hidden border border-white/10">
+                    <div id="prog-sec-bar" class="h-full rounded-full progress-glow" style="width: 40%; transition: none;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODE 5: SAND TIMER (HOURGLASS) -->
+        <div id="view-sand" class="hidden flex-col items-center justify-center">
+            <div class="relative flex flex-col items-center">
+                <canvas id="sand-canvas" width="420" height="440" class="w-[min(64vw,50vh)] h-[min(66vw,52vh)] max-w-[420px] max-h-[440px]"></canvas>
+                <div id="sand-time-readout" class="mt-2 text-xl sm:text-2xl font-bold tracking-widest" style="color: var(--clock-color); text-shadow: 0 0 18px var(--glow-primary);">
+                    22:42:05
+                </div>
+            </div>
+        </div>
+
+        <!-- Shared Date Row -->
+        <div id="date-container" class="date-display">
+            Sunday 25 October 2026
+        </div>
+    </main>
+
+    <!-- Popover Customization Drawer (Toggled via Customize button or 'C' key) -->
+    <aside id="settings-drawer" class="drawer-closed fixed bottom-16 right-5 z-30 w-[min(92vw,420px)] max-h-[80vh] overflow-y-auto bg-zinc-950/90 backdrop-blur-xl border border-zinc-800/90 rounded-2xl p-5 text-zinc-200 shadow-2xl">
+        <div class="flex items-center justify-between pb-3 mb-4 border-b border-zinc-800">
+            <div>
+                <h2 class="text-sm font-semibold text-white tracking-wide flex items-center gap-2">
+                    <span>Clockity Studio</span>
+                    <span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Zero-Bloat Engine</span>
+                </h2>
+                <p class="text-[11px] text-zinc-400 mt-0.5">Procedural WebGL/Canvas • No external video/GIF overhead</p>
+            </div>
+            <button id="close-drawer-btn" class="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/80 transition" aria-label="Close settings">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </div>
+
+        <!-- 1. Clock Mode (Digital, 12h Analog, 24h Analog, Progress Bars, Sand Timer) -->
+        <div class="mb-5">
+            <label class="block text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-2">Clock Mode</label>
+            <div class="grid grid-cols-3 gap-1.5" id="clock-mode-group">
+                <button data-mode="digital" class="opt-pill selected">Digital</button>
+                <button data-mode="analog12" class="opt-pill">12h Analog</button>
+                <button data-mode="analog24" class="opt-pill" title="Single 24-hour hand rotation per day">24h Analog</button>
+                <button data-mode="progress" class="opt-pill">Progress Bars</button>
+                <button data-mode="sand" class="opt-pill">Sand Timer</button>
+            </div>
+        </div>
+
+        <!-- 2. Time & Date Format -->
+        <div class="mb-5">
+            <label class="block text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-2">Time & Precision</label>
+            <div class="grid grid-cols-3 gap-1.5 mb-2">
+                <button id="opt-24h" class="opt-pill selected">24-Hour</button>
+                <button id="opt-seconds" class="opt-pill">Seconds (:SS)</button>
+                <button id="opt-ms" class="opt-pill">Millisec (.ms)</button>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+                <button id="opt-blink" class="opt-pill">Blink Colon</button>
+                <button id="opt-slash-zero" class="opt-pill selected">Slashed Zero</button>
+                <button id="opt-drift" class="opt-pill" title="Subtle periodic pixel shift to prevent OLED/LCD retention">Anti-Burn Drift</button>
+            </div>
+        </div>
+
+        <!-- 3. Date Format -->
+        <div class="mb-5">
+            <label class="block text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-2">Date Format</label>
+            <div class="grid grid-cols-2 gap-1.5" id="date-format-group">
+                <button data-datefmt="dmy" class="opt-pill selected">Thursday 31 Dec 2026</button>
+                <button data-datefmt="jp" class="opt-pill">2026年10月25日 (日)</button>
+                <button data-datefmt="mdy" class="opt-pill">Wednesday, Oct 21, 2026</button>
+                <button data-datefmt="iso" class="opt-pill">2026-10-25 (Sun)</button>
+                <button data-datefmt="short" class="opt-pill">Sun, 25 Oct 2026</button>
+                <button data-datefmt="hidden" class="opt-pill">Hide Date</button>
+            </div>
+        </div>
+
+        <!-- 4. Procedural Animated Backgrounds -->
+        <div class="mb-5">
+            <div class="flex items-center justify-between mb-2">
+                <label class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Animated Background</label>
+                <span class="text-[10px] text-zinc-500">Procedural ~20 FPS Eco-Loop</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5" id="bg-anim-group">
+                <button data-bg="none" class="opt-pill selected">Pure Solid</button>
+                <button data-bg="tod" class="opt-pill" title="Shifts ambient sky palette smoothly by time of day">Time of Day</button>
+                <button data-bg="aurora" class="opt-pill">Aurora Silk</button>
+                <button data-bg="stars" class="opt-pill">Starfield</button>
+                <button data-bg="matrix" class="opt-pill">Matrix Rain</button>
+                <button data-bg="fire" class="opt-pill">Ember Fire</button>
+                <button data-bg="water" class="opt-pill">Deep Water</button>
+                <button data-bg="static" class="opt-pill">CRT Static</button>
+            </div>
+        </div>
+
+        <!-- 5. Color Themes & Custom Pickers -->
+        <div class="mb-5">
+            <label class="block text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-2">Color Theme</label>
+            <div class="grid grid-cols-4 gap-1.5 mb-3" id="theme-group">
+                <button data-theme="emerald" class="opt-pill selected flex items-center justify-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#2bd999]"></span>Emerald
+                </button>
+                <button data-theme="amber" class="opt-pill flex items-center justify-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#ffb000]"></span>Amber
+                </button>
+                <button data-theme="cyberpunk" class="opt-pill flex items-center justify-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#00f0ff]"></span>Cyber
+                </button>
+                <button data-theme="nixie" class="opt-pill flex items-center justify-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#ff5a1f]"></span>Nixie
+                </button>
+                <button data-theme="mono" class="opt-pill flex items-center justify-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#f4f4f5]"></span>Mono
+                </button>
+                <button data-theme="crimson" class="opt-pill flex items-center justify-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#ff2a55]"></span>Crimson
+                </button>
+                <button data-theme="ocean" class="opt-pill flex items-center justify-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#38bdf8]"></span>Ocean
+                </button>
+                <button data-theme="matcha" class="opt-pill flex items-center justify-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-[#a3e635]"></span>Matcha
+                </button>
+            </div>
+            <!-- Custom Color Pickers -->
+            <div class="grid grid-cols-3 gap-2 bg-zinc-900/70 p-2.5 rounded-xl border border-zinc-800/80">
+                <label class="flex items-center justify-between text-[11px] text-zinc-300 cursor-pointer">
+                    <span>Clock</span>
+                    <input type="color" id="custom-clock-color" value="#2bd999" class="w-6 h-6 rounded bg-transparent border-0 cursor-pointer">
+                </label>
+                <label class="flex items-center justify-between text-[11px] text-zinc-300 cursor-pointer">
+                    <span>Accent</span>
+                    <input type="color" id="custom-date-color" value="#24b880" class="w-6 h-6 rounded bg-transparent border-0 cursor-pointer">
+                </label>
+                <label class="flex items-center justify-between text-[11px] text-zinc-300 cursor-pointer">
+                    <span>Backdrop</span>
+                    <input type="color" id="custom-bg-color" value="#000000" class="w-6 h-6 rounded bg-transparent border-0 cursor-pointer">
+                </label>
+            </div>
+        </div>
+
+        <!-- 6. Typography / Fonts -->
+        <div class="mb-5">
+            <label class="block text-[11px] font-semibold uppercase tracking-wider text-zinc-400 mb-2">Font Face</label>
+            <div class="grid grid-cols-3 gap-1.5" id="font-group">
+                <button data-font="'Orbitron', sans-serif" class="opt-pill selected" style="font-family: 'Orbitron', sans-serif;">Orbitron</button>
+                <button data-font="'Share Tech Mono', monospace" class="opt-pill" style="font-family: 'Share Tech Mono', monospace;">Tech Mono</button>
+                <button data-font="'JetBrains Mono', monospace" class="opt-pill" style="font-family: 'JetBrains Mono', monospace;">JetBrains</button>
+                <button data-font="'Inter', sans-serif" class="opt-pill" style="font-family: 'Inter', sans-serif;">Modern Sans</button>
+                <button data-font="'Silkscreen', monospace" class="opt-pill" style="font-family: 'Silkscreen', monospace;">Pixel LED</button>
+                <button data-font="'Cinzel', serif" class="opt-pill" style="font-family: 'Cinzel', serif;">Chronos Serif</button>
+            </div>
+        </div>
+
+        <!-- 7. Panel De-Energizer (Screen Blanker / Dead-Screen Toggle + Idle Timer) -->
+        <div class="pt-3 border-t border-zinc-800">
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <label class="block text-[11px] font-semibold uppercase tracking-wider text-zinc-300">Panel De-Energizer (Blank Screen)</label>
+                    <p class="text-[10px] text-zinc-400">Hides clock to rest LCD/OLED pixels while keeping system awake</p>
+                </div>
+                <button id="drawer-blank-now-btn" class="px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-medium text-white border border-zinc-700 transition">
+                    Blank Now (B)
+                </button>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mt-2.5">
+                <div class="flex items-center justify-between bg-zinc-900/70 px-2.5 py-1.5 rounded-lg border border-zinc-800">
+                    <span class="text-[11px] text-zinc-300">Blank Tint</span>
+                    <div class="flex items-center gap-1.5">
+                        <button data-blankcolor="#000000" class="blank-swatch w-4 h-4 rounded-full bg-black border border-zinc-500" title="Pure Black (#000000)"></button>
+                        <button data-blankcolor="#050811" class="blank-swatch w-4 h-4 rounded-full bg-[#050811] border border-zinc-700" title="Midnight Navy (#050811)"></button>
+                        <button data-blankcolor="#0d0604" class="blank-swatch w-4 h-4 rounded-full bg-[#0d0604] border border-zinc-700" title="Warm Pitch (#0d0604)"></button>
+                        <input type="color" id="blank-custom-color" value="#000000" class="w-5 h-5 bg-transparent border-0 cursor-pointer" title="Custom Dark Color">
+                    </div>
+                </div>
+                <div class="flex items-center justify-between bg-zinc-900/70 px-2.5 py-1.5 rounded-lg border border-zinc-800">
+                    <span class="text-[11px] text-zinc-300">Auto-Blank</span>
+                    <select id="auto-blank-select" class="bg-transparent text-[11px] text-zinc-200 font-medium focus:outline-none cursor-pointer">
+                        <option value="0" class="bg-zinc-900">Manual Only</option>
+                        <option value="5" class="bg-zinc-900">After 5 min</option>
+                        <option value="15" class="bg-zinc-900">After 15 min</option>
+                        <option value="30" class="bg-zinc-900">After 30 min</option>
+                        <option value="60" class="bg-zinc-900">After 60 min</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Bottom-Right Minimal Control Bar (Preserves original Clockity layout + quick toggles) -->
+    <nav class="control-bar fixed bottom-3.5 right-5 z-20 flex flex-wrap items-center justify-end gap-1.5 sm:gap-2.5 bg-black/65 backdrop-blur-md border border-white/10 px-2.5 py-1 rounded-lg" aria-label="Clock controls">
+        
+        <!-- Customize / Studio Drawer Button -->
+        <button id="customize-btn" class="ctrl-btn" title="Customize Themes, Fonts, Modes & Animated Backgrounds (Shortcut: C)">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle>
+                <circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle>
+                <circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle>
+                <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle>
+                <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"></path>
+            </svg>
+            <span>Customize</span>
+        </button>
+
+        <!-- Panel De-Energizer (Pure Black / Dark Colored Screen Toggle) -->
+        <button id="blanker-btn" class="ctrl-btn" title="De-energize LCD Panel / Blank Screen while keeping No-Sleep active (Shortcut: B)">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
+            </svg>
+            <span class="hidden md:inline">Blank Screen</span>
+        </button>
+
+        <!-- Fullscreen Toggle -->
+        <button id="fullscreen-btn" class="ctrl-btn" title="Toggle Fullscreen (Double-click screen or press F)">
+            Enter fullscreen
+        </button>
+
+        <!-- 12h / 24h Format Toggle -->
+        <button id="format-btn" class="ctrl-btn" title="Toggle 12-hour / 24-hour time">
+            Switch to 12h
+        </button>
+
+        <!-- Brightness / Glow Dimmer Icon (Sun) -->
+        <button id="brightness-btn" class="ctrl-btn" title="Cycle Brightness / Night Mode" aria-label="Adjust Brightness">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="4"></circle>
+                <path d="M12 2v2"></path>
+                <path d="M12 20v2"></path>
+                <path d="m4.93 4.93 1.41 1.41"></path>
+                <path d="m17.66 17.66 1.41 1.41"></path>
+                <path d="M2 12h2"></path>
+                <path d="M20 12h2"></path>
+                <path d="m6.34 17.66-1.41 1.41"></path>
+                <path d="m19.07 4.93-1.41 1.41"></path>
+            </svg>
+        </button>
+
+        <!-- Zoom Out (Magnifying Glass -) -->
+        <button id="zoom-out-btn" class="ctrl-btn" title="Zoom Out" aria-label="Zoom Out">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                <line x1="8" y1="11" x2="14" y2="11"></line>
+            </svg>
+        </button>
+
+        <!-- Current Zoom Level Display (matches "200%" in reference) -->
+        <span id="zoom-label" class="text-[#d8d8d8] text-[13px] font-medium min-w-[38px] text-center select-none">
+            200%
+        </span>
+
+        <!-- Zoom In (Magnifying Glass +) -->
+        <button id="zoom-in-btn" class="ctrl-btn" title="Zoom In" aria-label="Zoom In">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                <line x1="11" y1="8" x2="11" y2="14"></line>
+                <line x1="8" y1="11" x2="14" y2="11"></line>
+            </svg>
+        </button>
+
+        <!-- Reset Zoom & Settings (Circular Counter-Clockwise Arrow) -->
+        <button id="reset-btn" class="ctrl-btn" title="Reset Default View (200%)" aria-label="Reset Zoom">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                <path d="M3 3v5h5"></path>
+            </svg>
+        </button>
+    </nav>
+
+    <script>
+        /**
+         * Theme Presets
+         */
+        const THEMES = {
+            emerald:   { clock: '#2bd999', date: '#24b880', bg: '#000000', name: 'Emerald' },
+            amber:     { clock: '#ffb000', date: '#cc8800', bg: '#050300', name: 'Amber Phosphor' },
+            cyberpunk: { clock: '#00f0ff', date: '#ff2a85', bg: '#060212', name: 'Cyberpunk Neon' },
+            nixie:     { clock: '#ff5a1f', date: '#d97706', bg: '#090402', name: 'Nixie Tube' },
+            mono:      { clock: '#f4f4f5', date: '#a1a1aa', bg: '#000000', name: 'Monochrome' },
+            crimson:   { clock: '#ff2a55', date: '#be123c', bg: '#050002', name: 'Crimson Night' },
+            ocean:     { clock: '#38bdf8', date: '#0284c7', bg: '#020813', name: 'Deep Ocean' },
+            matcha:    { clock: '#a3e635', date: '#65a30d', bg: '#040902', name: 'Matcha Zen' }
+        };
+
+        /**
+         * Application State
+         */
+        const state = {
+            clockMode: 'digital',      // 'digital' | 'analog12' | 'analog24' | 'progress' | 'sand'
+            use24Hour: true,
+            showSeconds: false,
+            showMs: false,
+            blinkColon: false,
+            slashedZero: true,
+            antiBurnDrift: false,
+            dateFormat: 'dmy',         // 'dmy' | 'jp' | 'mdy' | 'iso' | 'short' | 'hidden'
+            bgAnim: 'none',            // 'none' | 'tod' | 'aurora' | 'stars' | 'matrix' | 'fire' | 'water' | 'static'
+            theme: 'emerald',
+            clockColor: '#2bd999',
+            dateColor: '#24b880',
+            bgColor: '#000000',
+            fontFamily: "'Orbitron', sans-serif",
+            zoomPercent: 200,
+            brightnessLevels: [1, 0.65, 0.35, 0.15],
+            brightnessIndex: 0,
+            isBlanked: false,
+            blankColor: '#000000',
+            autoBlankMinutes: 0,
+            drawerOpen: false,
+            wakeLockSentinel: null,
+            idleTimer: null,
+            autoBlankTimer: null,
+            toastTimer: null,
+            driftTimer: null,
+            msRafId: null,
+            bgRafId: null,
+            audioCtx: null
+        };
+
+        // Load saved preferences safely
+        function loadSavedSettings() {
+            try {
+                const raw = localStorage.getItem('clockity_prefs_v2');
+                if (!raw) return;
+                const saved = JSON.parse(raw);
+                const keys = [
+                    'clockMode', 'use24Hour', 'showSeconds', 'showMs', 'blinkColon',
+                    'slashedZero', 'antiBurnDrift', 'dateFormat', 'bgAnim', 'theme',
+                    'clockColor', 'dateColor', 'bgColor', 'fontFamily', 'zoomPercent',
+                    'brightnessIndex', 'blankColor', 'autoBlankMinutes'
+                ];
+                keys.forEach(k => {
+                    if (saved[k] !== undefined) state[k] = saved[k];
+                });
+            } catch (e) {
+                // Ignore sandboxed storage restrictions
+            }
+        }
+
+        function saveSettings() {
+            try {
+                const subset = {
+                    clockMode: state.clockMode,
+                    use24Hour: state.use24Hour,
+                    showSeconds: state.showSeconds,
+                    showMs: state.showMs,
+                    blinkColon: state.blinkColon,
+                    slashedZero: state.slashedZero,
+                    antiBurnDrift: state.antiBurnDrift,
+                    dateFormat: state.dateFormat,
+                    bgAnim: state.bgAnim,
+                    theme: state.theme,
+                    clockColor: state.clockColor,
+                    dateColor: state.dateColor,
+                    bgColor: state.bgColor,
+                    fontFamily: state.fontFamily,
+                    zoomPercent: state.zoomPercent,
+                    brightnessIndex: state.brightnessIndex,
+                    blankColor: state.blankColor,
+                    autoBlankMinutes: state.autoBlankMinutes
+                };
+                localStorage.setItem('clockity_prefs_v2', JSON.stringify(subset));
+            } catch (e) {}
+        }
+
+        // DOM Elements
+        const timeContainer = document.getElementById('time-container');
+        const hoursEl = document.getElementById('hours-text');
+        const minutesEl = document.getElementById('minutes-text');
+        const mainColonEl = document.getElementById('main-colon');
+        const secColonEl = document.getElementById('sec-colon');
+        const secondsWrapper = document.getElementById('seconds-wrapper');
+        const secondsEl = document.getElementById('seconds-text');
+        const msEl = document.getElementById('ms-text');
+        const ampmEl = document.getElementById('ampm-text');
+        const dateEl = document.getElementById('date-container');
+
+        const viewDigital = document.getElementById('view-digital');
+        const viewAnalog = document.getElementById('view-analog');
+        const viewProgress = document.getElementById('view-progress');
+        const viewSand = document.getElementById('view-sand');
+
+        const analogCanvas = document.getElementById('analog-canvas');
+        const sandCanvas = document.getElementById('sand-canvas');
+        const sandReadout = document.getElementById('sand-time-readout');
+
+        const progDayLabel = document.getElementById('prog-day-label');
+        const progDayVal = document.getElementById('prog-day-val');
+        const progDayBar = document.getElementById('prog-day-bar');
+        const progHourVal = document.getElementById('prog-hour-val');
+        const progHourBar = document.getElementById('prog-hour-bar');
+        const progMinVal = document.getElementById('prog-min-val');
+        const progMinBar = document.getElementById('prog-min-bar');
+        const progSecRow = document.getElementById('prog-sec-row');
+        const progSecVal = document.getElementById('prog-sec-val');
+        const progSecBar = document.getElementById('prog-sec-bar');
+
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const formatBtn = document.getElementById('format-btn');
+        const brightnessBtn = document.getElementById('brightness-btn');
+        const zoomOutBtn = document.getElementById('zoom-out-btn');
+        const zoomInBtn = document.getElementById('zoom-in-btn');
+        const zoomLabel = document.getElementById('zoom-label');
+        const resetBtn = document.getElementById('reset-btn');
+        const customizeBtn = document.getElementById('customize-btn');
+        const blankerBtn = document.getElementById('blanker-btn');
+        const blankerOverlay = document.getElementById('blanker-overlay');
+        const blankerHint = document.getElementById('blanker-hint');
+
+        const settingsDrawer = document.getElementById('settings-drawer');
+        const closeDrawerBtn = document.getElementById('close-drawer-btn');
+
+        const toastEl = document.getElementById('status-toast');
+        const toastText = document.getElementById('toast-text');
+        const wakeDot = document.getElementById('wake-dot');
+
+        /**
+         * Convert hex (#rrggbb) to rgba(r, g, b, a)
+         */
+        function hexToRgba(hex, alpha) {
+            let c = (hex || '#2bd999').replace('#', '');
+            if (c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
+            const num = parseInt(c, 16);
+            const r = (num >> 16) & 255;
+            const g = (num >> 8) & 255;
+            const b = num & 255;
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        function hexToRgbObj(hex) {
+            let c = (hex || '#2bd999').replace('#', '');
+            if (c.length === 3) c = c[0]+c[0]+c[1]+c[1]+c[2]+c[2];
+            const num = parseInt(c, 16);
+            return {
+                r: (num >> 16) & 255,
+                g: (num >> 8) & 255,
+                b: num & 255
+            };
+        }
+
+        /**
+         * Apply CSS Variables for Theme, Font, Zoom, and Brightness
+         */
+        function applyVisualVariables() {
+            const root = document.documentElement;
+            root.style.setProperty('--clock-color', state.clockColor);
+            root.style.setProperty('--date-color', state.dateColor);
+            root.style.setProperty('--bg-color', state.bgColor);
+            root.style.setProperty('--glow-primary', hexToRgba(state.clockColor, 0.52));
+            root.style.setProperty('--glow-secondary', hexToRgba(state.clockColor, 0.24));
+            root.style.setProperty('--clock-font', state.fontFamily);
+
+            const scaleFactor = state.zoomPercent / 200;
+            root.style.setProperty('--zoom-scale', scaleFactor);
+            zoomLabel.textContent = `${state.zoomPercent}%`;
+
+            const level = state.brightnessLevels[state.brightnessIndex] || 1;
+            root.style.setProperty('--brightness', level);
+
+            document.body.classList.toggle('slashed-zero-on', state.slashedZero);
+            blankerOverlay.style.backgroundColor = state.blankColor;
+
+            // Sync custom color inputs
+            document.getElementById('custom-clock-color').value = state.clockColor;
+            document.getElementById('custom-date-color').value = state.dateColor;
+            document.getElementById('custom-bg-color').value = state.bgColor;
+            document.getElementById('blank-custom-color').value = state.blankColor;
+        }
+
+        /**
+         * Wrap every '0' in a span with a crisp diagonal slash
+         */
+        function formatWithSlashedZeros(str, className) {
+            return str
+                .split('')
+                .map(ch => ch === '0' ? `<span class="${className}">0</span>` : ch)
+                .join('');
+        }
+
+        /**
+         * Format Date according to selected format:
+         * - 'dmy': "Thursday 31 December 2026"
+         * - 'jp': "2026年10月25日 (日)"
+         * - 'mdy': "Wednesday, October 21, 2026"
+         * - 'iso': "2026-10-25 (Sun)"
+         * - 'short': "Sun, 25 Oct 2026"
+         * - 'hidden': ""
+         */
+        function getFormattedDateString(now) {
+            if (state.dateFormat === 'hidden') return '';
+
+            const daysLong = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            const daysShort = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            const daysJp = ['日', '月', '火', '水', '木', '金', '土'];
+            const monthsLong = [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'
+            ];
+            const monthsShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+            const y = now.getFullYear();
+            const m = now.getMonth();
+            const d = now.getDate();
+            const w = now.getDay();
+
+            switch (state.dateFormat) {
+                case 'dmy':
+                    return `${daysLong[w]} ${d} ${monthsLong[m]} ${y}`;
+                case 'jp':
+                    return `${y}年${String(m + 1).padStart(2, '0')}月${String(d).padStart(2, '0')}日 (${daysJp[w]})`;
+                case 'mdy':
+                    return `${daysLong[w]}, ${monthsLong[m]} ${d}, ${y}`;
+                case 'iso':
+                    return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')} (${daysShort[w]})`;
+                case 'short':
+                    return `${daysShort[w]}, ${d} ${monthsShort[m]} ${y}`;
+                default:
+                    return `${daysLong[w]} ${d} ${monthsLong[m]} ${y}`;
+            }
+        }
+
+        /**
+         * Core Clock Update Function
+         */
+        function updateClock() {
+            if (state.isBlanked) return;
+
+            const now = new Date();
+            const rawHours = now.getHours();
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+            const ms = now.getMilliseconds();
+
+            let displayHours = rawHours;
+            let ampm = rawHours >= 12 ? 'PM' : 'AM';
+
+            if (!state.use24Hour) {
+                displayHours = rawHours % 12;
+                displayHours = displayHours ? displayHours : 12;
+                ampmEl.textContent = ampm;
+                ampmEl.classList.remove('hidden');
+            } else {
+                ampmEl.classList.add('hidden');
+            }
+
+            // 1. Update Digital View
+            if (state.clockMode === 'digital') {
+                const hoursStr = String(displayHours).padStart(2, '0');
+                const minutesStr = String(minutes).padStart(2, '0');
+                const secondsStr = String(seconds).padStart(2, '0');
+
+                hoursEl.innerHTML = formatWithSlashedZeros(hoursStr, 'zero-char');
+                minutesEl.innerHTML = formatWithSlashedZeros(minutesStr, 'zero-char');
+
+                if (state.showSeconds || state.showMs) {
+                    secondsWrapper.classList.remove('hidden');
+                    secondsEl.innerHTML = formatWithSlashedZeros(secondsStr, 'zero-char');
+                } else {
+                    secondsWrapper.classList.add('hidden');
+                }
+
+                if (state.showMs) {
+                    msEl.classList.remove('hidden');
+                    msEl.textContent = '.' + String(ms).padStart(3, '0');
+                } else {
+                    msEl.classList.add('hidden');
+                }
+
+                timeContainer.classList.toggle('with-seconds', state.showSeconds && !state.showMs);
+                timeContainer.classList.toggle('with-ms', state.showMs);
+
+                // Blinking colon handling
+                const shouldDim = state.blinkColon && (seconds % 2 === 1);
+                mainColonEl.classList.toggle('colon-dim', shouldDim);
+                secColonEl.classList.toggle('colon-dim', shouldDim);
+            }
+
+            // 2. Update Analog View (12h or 24h)
+            if (state.clockMode === 'analog12' || state.clockMode === 'analog24') {
+                drawAnalogClock(now);
+            }
+
+            // 3. Update Progress Bars View
+            if (state.clockMode === 'progress') {
+                updateProgressClock(now);
+            }
+
+            // 4. Update Sand Timer View
+            if (state.clockMode === 'sand') {
+                drawSandTimer(now);
+            }
+
+            // 5. Update Shared Date Display
+            if (state.dateFormat === 'hidden') {
+                dateEl.classList.add('hidden');
+            } else {
+                dateEl.classList.remove('hidden');
+                const formattedDate = getFormattedDateString(now);
+                dateEl.innerHTML = formatWithSlashedZeros(formattedDate, 'date-zero-char');
+            }
+        }
+
+        /**
+         * Draw 12h or 24h Analog Clock
+         */
+        function drawAnalogClock(now) {
+            const ctx = analogCanvas.getContext('2d');
+            const w = analogCanvas.width;
+            const h = analogCanvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+            const radius = (Math.min(w, h) / 2) - 28;
+
+            ctx.clearRect(0, 0, w, h);
+
+            const is24 = state.clockMode === 'analog24';
+            const totalTicks = is24 ? 24 : 12;
+
+            // Outer glowing ring
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius + 8, 0, Math.PI * 2);
+            ctx.strokeStyle = hexToRgba(state.clockColor, 0.28);
+            ctx.lineWidth = 3;
+            ctx.shadowColor = state.clockColor;
+            ctx.shadowBlur = 18;
+            ctx.stroke();
+            ctx.restore();
+
+            // Tick marks and numerals
+            ctx.save();
+            ctx.font = `700 ${is24 ? '15px' : '20px'} ${state.fontFamily}`;
+            ctx.fillStyle = state.clockColor;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let i = 0; i < 60; i++) {
+                const angle = (i * 6 - 90) * (Math.PI / 180);
+                const isMajor = i % 5 === 0;
+                if (!is24 || !isMajor) {
+                    const innerR = isMajor ? radius - 14 : radius - 7;
+                    ctx.beginPath();
+                    ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR);
+                    ctx.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+                    ctx.strokeStyle = isMajor ? state.clockColor : hexToRgba(state.dateColor, 0.35);
+                    ctx.lineWidth = isMajor ? 3 : 1.4;
+                    ctx.stroke();
+                }
+            }
+
+            // Hour markers & numerals for 12h or 24h dial
+            for (let hr = 0; hr < totalTicks; hr++) {
+                const angle = ((hr / totalTicks) * 360 - 90) * (Math.PI / 180);
+                if (is24) {
+                    const innerR = hr % 2 === 0 ? radius - 16 : radius - 9;
+                    ctx.beginPath();
+                    ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR);
+                    ctx.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+                    ctx.strokeStyle = hr % 2 === 0 ? state.clockColor : hexToRgba(state.dateColor, 0.6);
+                    ctx.lineWidth = hr % 2 === 0 ? 3 : 1.8;
+                    ctx.stroke();
+                }
+
+                const labelRadius = radius - 34;
+                const lx = cx + Math.cos(angle) * labelRadius;
+                const ly = cy + Math.sin(angle) * labelRadius;
+                const labelNum = is24 ? String(hr).padStart(2, '0') : (hr === 0 ? '12' : String(hr));
+                if (!is24 || hr % 2 === 0) {
+                    ctx.fillText(labelNum, lx, ly);
+                }
+            }
+            ctx.restore();
+
+            // Subtle mode badge inside dial
+            ctx.save();
+            ctx.font = `600 13px ${state.fontFamily}`;
+            ctx.fillStyle = hexToRgba(state.dateColor, 0.75);
+            ctx.textAlign = 'center';
+            const hours = now.getHours();
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+            const ms = now.getMilliseconds();
+            const digitalSub = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}${state.showSeconds ? ':' + String(seconds).padStart(2, '0') : ''}`;
+            ctx.fillText(is24 ? `24H SOLAR DIAL • ${digitalSub}` : digitalSub, cx, cy + radius * 0.45);
+            ctx.restore();
+
+            // Compute hand angles
+            const exactSeconds = seconds + (state.showMs ? ms / 1000 : 0);
+            const exactMinutes = minutes + exactSeconds / 60;
+            const exactHours = hours + exactMinutes / 60;
+
+            const hourAngle = is24
+                ? ((exactHours / 24) * 360 - 90) * (Math.PI / 180)
+                : (((exactHours % 12) / 12) * 360 - 90) * (Math.PI / 180);
+            const minAngle = ((exactMinutes / 60) * 360 - 90) * (Math.PI / 180);
+            const secAngle = ((exactSeconds / 60) * 360 - 90) * (Math.PI / 180);
+
+            // Draw Hour Hand
+            drawHand(ctx, cx, cy, hourAngle, radius * 0.52, 8, state.clockColor, 16);
+            // Draw Minute Hand
+            drawHand(ctx, cx, cy, minAngle, radius * 0.74, 5, state.dateColor, 12);
+            // Draw Second Hand (always shown on analog or when seconds enabled)
+            drawHand(ctx, cx, cy, secAngle, radius * 0.82, 2, '#ffffff', 8);
+
+            // Center cap
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+            ctx.fillStyle = state.clockColor;
+            ctx.shadowColor = state.clockColor;
+            ctx.shadowBlur = 12;
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawHand(ctx, cx, cy, angle, length, width, color, blur) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(cx - Math.cos(angle) * 16, cy - Math.sin(angle) * 16);
+            ctx.lineTo(cx + Math.cos(angle) * length, cy + Math.sin(angle) * length);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.lineCap = 'round';
+            ctx.shadowColor = color;
+            ctx.shadowBlur = blur;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        /**
+         * Update Progress Bars Mode
+         */
+        function updateProgressClock(now) {
+            const h = now.getHours();
+            const m = now.getMinutes();
+            const s = now.getSeconds();
+            const ms = now.getMilliseconds();
+
+            const daySeconds = h * 3600 + m * 60 + s + ms / 1000;
+            const dayPct = (daySeconds / 86400) * 100;
+            const hourPct = ((m * 60 + s + ms / 1000) / 3600) * 100;
+            const minPct = ((s + ms / 1000) / 60) * 100;
+            const secPct = (ms / 1000) * 100;
+
+            let dispH = h;
+            let suffix = '';
+            if (!state.use24Hour) {
+                suffix = h >= 12 ? ' PM' : ' AM';
+                dispH = h % 12 || 12;
+            }
+
+            progDayLabel.textContent = state.use24Hour ? 'DAY PROGRESS (24H)' : 'DAY PROGRESS (12H)';
+            progDayVal.textContent = `${String(dispH).padStart(2, '0')}:${String(m).padStart(2, '0')}${suffix} • ${dayPct.toFixed(1)}%`;
+            progDayBar.style.width = `${dayPct.toFixed(2)}%`;
+
+            progHourVal.textContent = `${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s • ${hourPct.toFixed(1)}%`;
+            progHourBar.style.width = `${hourPct.toFixed(2)}%`;
+
+            progMinVal.textContent = `${String(s).padStart(2, '0')}s • ${minPct.toFixed(0)}%`;
+            progMinBar.style.width = `${minPct.toFixed(2)}%`;
+
+            if (state.showSeconds || state.showMs) {
+                progSecRow.classList.remove('hidden');
+                progSecVal.textContent = `${String(ms).padStart(3, '0')}ms`;
+                progSecBar.style.width = `${secPct.toFixed(1)}%`;
+            } else {
+                progSecRow.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Draw Sand Timer (Hourglass) Mode
+         * Visualizes the current minute draining from top bulb to bottom bulb, with falling sand grains
+         */
+        function drawSandTimer(now) {
+            const ctx = sandCanvas.getContext('2d');
+            const w = sandCanvas.width;
+            const h = sandCanvas.height;
+            const cx = w / 2;
+            const cy = h / 2;
+
+            ctx.clearRect(0, 0, w, h);
+
+            const seconds = now.getSeconds();
+            const ms = now.getMilliseconds();
+            const progress = (seconds + ms / 1000) / 60; // 0.0 -> 1.0 over each minute
+
+            const topY = 45;
+            const botY = h - 45;
+            const halfW = 125;
+            const neckW = 10;
+
+            // Helper path for hourglass interior
+            function traceBulbPath(ctx) {
+                ctx.beginPath();
+                ctx.moveTo(cx - halfW, topY);
+                ctx.lineTo(cx + halfW, topY);
+                ctx.bezierCurveTo(cx + halfW, cy - 30, cx + neckW, cy - 18, cx + neckW, cy);
+                ctx.bezierCurveTo(cx + neckW, cy + 18, cx + halfW, cy + 30, cx + halfW, botY);
+                ctx.lineTo(cx - halfW, botY);
+                ctx.bezierCurveTo(cx - halfW, cy + 30, cx - neckW, cy + 18, cx - neckW, cy);
+                ctx.bezierCurveTo(cx - neckW, cy - 18, cx - halfW, cy - 30, cx - halfW, topY);
+                ctx.closePath();
+            }
+
+            // Clip to inside of hourglass for sand fill
+            ctx.save();
+            traceBulbPath(ctx);
+            ctx.clip();
+
+            // Top sand (draining)
+            const topRemain = 1 - progress;
+            const topBulbHeight = (cy - topY) - 8;
+            const sandTopY = cy - topBulbHeight * Math.pow(topRemain, 0.65);
+
+            const gradTop = ctx.createLinearGradient(0, sandTopY, 0, cy);
+            gradTop.addColorStop(0, state.clockColor);
+            gradTop.addColorStop(1, state.dateColor);
+            ctx.fillStyle = gradTop;
+            ctx.fillRect(cx - halfW, sandTopY, halfW * 2, cy - sandTopY);
+
+            // Falling sand stream in center
+            ctx.strokeStyle = state.clockColor;
+            ctx.lineWidth = 3;
+            ctx.setLineDash([4, 5]);
+            ctx.lineDashOffset = -(ms * 0.06);
+            ctx.beginPath();
+            ctx.moveTo(cx, cy - 2);
+            ctx.lineTo(cx, botY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Bottom sand (accumulating)
+            const botBulbHeight = (botY - cy) - 6;
+            const sandBotHeight = botBulbHeight * Math.pow(progress, 0.72);
+            const sandBotY = botY - sandBotHeight;
+
+            const gradBot = ctx.createLinearGradient(0, sandBotY, 0, botY);
+            gradBot.addColorStop(0, state.clockColor);
+            gradBot.addColorStop(1, state.dateColor);
+            ctx.fillStyle = gradBot;
+            ctx.beginPath();
+            ctx.moveTo(cx - halfW, botY);
+            ctx.lineTo(cx - halfW, sandBotY + 12);
+            ctx.quadraticCurveTo(cx, sandBotY - 12, cx + halfW, sandBotY + 12);
+            ctx.lineTo(cx + halfW, botY);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.restore();
+
+            // Draw glowing glass frame & end caps
+            ctx.save();
+            traceBulbPath(ctx);
+            ctx.strokeStyle = state.clockColor;
+            ctx.lineWidth = 4;
+            ctx.shadowColor = state.clockColor;
+            ctx.shadowBlur = 18;
+            ctx.stroke();
+
+            // Top and bottom caps
+            ctx.fillStyle = state.clockColor;
+            ctx.fillRect(cx - halfW - 14, topY - 10, (halfW + 14) * 2, 10);
+            ctx.fillRect(cx - halfW - 14, botY, (halfW + 14) * 2, 10);
+            ctx.restore();
+
+            // Readout text below hourglass
+            let dispH = now.getHours();
+            let ampm = '';
+            if (!state.use24Hour) {
+                ampm = dispH >= 12 ? ' PM' : ' AM';
+                dispH = dispH % 12 || 12;
+            }
+            const hStr = String(dispH).padStart(2, '0');
+            const mStr = String(now.getMinutes()).padStart(2, '0');
+            const sStr = String(seconds).padStart(2, '0');
+            sandReadout.textContent = `${hStr}:${mStr}:${sStr}${ampm}`;
+        }
+
+        /**
+         * Sync clock updates accurately (1000ms loop normally, or 45ms loop when Milliseconds/Sand/Analog smooth sweeps are active)
+         */
+        let secondIntervalId = null;
+        function startClockLoop() {
+            if (secondIntervalId) clearInterval(secondIntervalId);
+            if (state.msRafId) cancelAnimationFrame(state.msRafId);
+
+            updateClock();
+
+            const needsHighFreq = state.showMs || state.clockMode === 'sand' || (state.clockMode === 'progress' && (state.showSeconds || state.showMs));
+            if (needsHighFreq) {
+                let lastTick = 0;
+                function tickMs(ts) {
+                    if (ts - lastTick >= 42) { // ~24 fps for ultra-low CPU
+                        updateClock();
+                        lastTick = ts;
+                    }
+                    state.msRafId = requestAnimationFrame(tickMs);
+                }
+                state.msRafId = requestAnimationFrame(tickMs);
+            } else {
+                const now = new Date();
+                const msUntilNextSecond = 1000 - now.getMilliseconds();
+                setTimeout(() => {
+                    updateClock();
+                    secondIntervalId = setInterval(updateClock, 1000);
+                }, msUntilNextSecond);
+            }
+        }
+
+        /**
+         * Switch Clock Mode View
+         */
+        function applyClockMode() {
+            viewDigital.classList.toggle('hidden', state.clockMode !== 'digital');
+            viewDigital.classList.toggle('flex', state.clockMode === 'digital');
+
+            const isAnalog = state.clockMode === 'analog12' || state.clockMode === 'analog24';
+            viewAnalog.classList.toggle('hidden', !isAnalog);
+            viewAnalog.classList.toggle('flex', isAnalog);
+
+            viewProgress.classList.toggle('hidden', state.clockMode !== 'progress');
+            viewProgress.classList.toggle('flex', state.clockMode === 'progress');
+
+            viewSand.classList.toggle('hidden', state.clockMode !== 'sand');
+            viewSand.classList.toggle('flex', state.clockMode === 'sand');
+
+            startClockLoop();
+        }
+
+        /**
+         * Anti-Burn-In Subtle Pixel Drift
+         * Slowly shifts the clock container within a safe radius every 20 seconds
+         */
+        function setupAntiBurnDrift() {
+            if (state.driftTimer) {
+                clearInterval(state.driftTimer);
+                state.driftTimer = null;
+            }
+            const root = document.documentElement;
+            if (!state.antiBurnDrift) {
+                root.style.setProperty('--drift-x', '0px');
+                root.style.setProperty('--drift-y', '0px');
+                return;
+            }
+            function stepDrift() {
+                const maxX = Math.min(window.innerWidth * 0.045, 48);
+                const maxY = Math.min(window.innerHeight * 0.045, 36);
+                const dx = Math.round((Math.random() * 2 - 1) * maxX);
+                const dy = Math.round((Math.random() * 2 - 1) * maxY);
+                root.style.setProperty('--drift-x', `${dx}px`);
+                root.style.setProperty('--drift-y', `${dy}px`);
+            }
+            stepDrift();
+            state.driftTimer = setInterval(stepDrift, 15000);
+        }
+
+        /**
+         * ============================================================================
+         * PROCEDURAL ANIMATED BACKGROUNDS ENGINE (Zero External Libraries, ~20 FPS Eco)
+         * ============================================================================
+         */
+        const bgCanvas = document.getElementById('bg-canvas');
+        const bgCtx = bgCanvas.getContext('2d');
+        let bgState = {
+            cols: [],
+            stars: [],
+            embers: [],
+            ripples: [],
+            staticCanvas: null,
+            phase: 0
+        };
+
+        function resizeBgCanvas() {
+            bgCanvas.width = window.innerWidth;
+            bgCanvas.height = window.innerHeight;
+            initBgStructures();
+        }
+
+        function initBgStructures() {
+            const w = bgCanvas.width;
+            const h = bgCanvas.height;
+
+            // Matrix columns
+            const colWidth = 22;
+            const numCols = Math.ceil(w / colWidth);
+            bgState.cols = Array.from({ length: numCols }, () => Math.random() * -50);
+
+            // Starfield particles
+            bgState.stars = Array.from({ length: 110 }, () => ({
+                x: (Math.random() - 0.5) * w * 1.5,
+                y: (Math.random() - 0.5) * h * 1.5,
+                z: Math.random() * w
+            }));
+
+            // Ember Fire particles
+            bgState.embers = Array.from({ length: 65 }, () => ({
+                x: Math.random() * w,
+                y: h + Math.random() * h * 0.5,
+                r: 1.5 + Math.random() * 4.5,
+                vy: 0.8 + Math.random() * 2.2,
+                vx: (Math.random() - 0.5) * 0.9,
+                alpha: 0.2 + Math.random() * 0.65
+            }));
+
+            // Water ripples
+            bgState.ripples = Array.from({ length: 7 }, () => ({
+                x: Math.random() * w,
+                y: Math.random() * h,
+                r: Math.random() * 140,
+                maxR: 160 + Math.random() * 180,
+                speed: 0.7 + Math.random() * 0.9
+            }));
+
+            // Small offscreen buffer for ultra-light CRT static
+            const sc = document.createElement('canvas');
+            sc.width = 160;
+            sc.height = 100;
+            bgState.staticCanvas = sc;
+        }
+
+        function startBgLoop() {
+            if (state.bgRafId) {
+                cancelAnimationFrame(state.bgRafId);
+                state.bgRafId = null;
+            }
+
+            if (state.bgAnim === 'none' || state.isBlanked) {
+                bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+                return;
+            }
+
+            let lastFrame = 0;
+            const frameInterval = 50; // ~20 FPS keeps laptop cool & battery friendly
+
+            function loop(ts) {
+                if (state.bgAnim === 'none' || state.isBlanked) {
+                    bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+                    return;
+                }
+                if (ts - lastFrame >= frameInterval) {
+                    renderBgFrame(ts);
+                    lastFrame = ts;
+                }
+                state.bgRafId = requestAnimationFrame(loop);
+            }
+            state.bgRafId = requestAnimationFrame(loop);
+        }
+
+        function renderBgFrame(ts) {
+            const w = bgCanvas.width;
+            const h = bgCanvas.height;
+            bgState.phase += 0.02;
+            const rgb = hexToRgbObj(state.clockColor);
+            const dateRgb = hexToRgbObj(state.dateColor);
+
+            switch (state.bgAnim) {
+                case 'matrix': {
+                    bgCtx.fillStyle = 'rgba(0, 0, 0, 0.14)';
+                    bgCtx.fillRect(0, 0, w, h);
+                    bgCtx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.42)`;
+                    bgCtx.font = '16px monospace';
+                    const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎﾃﾏｹﾒｴｶｷﾑﾕﾗｾﾈｽﾀﾇﾍ';
+                    for (let i = 0; i < bgState.cols.length; i++) {
+                        const ch = chars[Math.floor(Math.random() * chars.length)];
+                        const x = i * 22;
+                        const y = bgState.cols[i] * 20;
+                        bgCtx.fillText(ch, x, y);
+                        if (y > h && Math.random() > 0.965) {
+                            bgState.cols[i] = 0;
+                        } else {
+                            bgState.cols[i] += 0.75;
+                        }
+                    }
+                    break;
+                }
+
+                case 'fire': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    // Bottom warm glow
+                    const baseGrad = bgCtx.createLinearGradient(0, h * 0.45, 0, h);
+                    baseGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                    baseGrad.addColorStop(1, `rgba(${rgb.r}, ${Math.floor(rgb.g * 0.45)}, 10, 0.28)`);
+                    bgCtx.fillStyle = baseGrad;
+                    bgCtx.fillRect(0, 0, w, h);
+
+                    for (const p of bgState.embers) {
+                        p.y -= p.vy;
+                        p.x += p.vx + Math.sin(bgState.phase + p.y * 0.02) * 0.5;
+                        const lifeRatio = Math.max(0, p.y / h);
+                        bgCtx.beginPath();
+                        bgCtx.arc(p.x, p.y, p.r * lifeRatio + 0.5, 0, Math.PI * 2);
+                        bgCtx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${(p.alpha * lifeRatio).toFixed(2)})`;
+                        bgCtx.fill();
+
+                        if (p.y < -10) {
+                            p.y = h + 15;
+                            p.x = Math.random() * w;
+                        }
+                    }
+                    break;
+                }
+
+                case 'water': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    // Subtle sine caustics + expanding ripples
+                    for (let i = 0; i < 4; i++) {
+                        bgCtx.beginPath();
+                        const baseY = (h / 5) * (i + 1);
+                        for (let x = 0; x <= w; x += 24) {
+                            const y = baseY + Math.sin(x * 0.006 + bgState.phase + i) * 26;
+                            if (x === 0) bgCtx.moveTo(x, y);
+                            else bgCtx.lineTo(x, y);
+                        }
+                        bgCtx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.11)`;
+                        bgCtx.lineWidth = 2;
+                        bgCtx.stroke();
+                    }
+
+                    for (const rp of bgState.ripples) {
+                        rp.r += rp.speed;
+                        const alpha = Math.max(0, (1 - rp.r / rp.maxR) * 0.28);
+                        bgCtx.beginPath();
+                        bgCtx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
+                        bgCtx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha.toFixed(3)})`;
+                        bgCtx.lineWidth = 1.8;
+                        bgCtx.stroke();
+
+                        if (rp.r >= rp.maxR) {
+                            rp.r = 2;
+                            rp.x = Math.random() * w;
+                            rp.y = Math.random() * h;
+                        }
+                    }
+                    break;
+                }
+
+                case 'stars': {
+                    bgCtx.fillStyle = 'rgba(0, 0, 0, 0.32)';
+                    bgCtx.fillRect(0, 0, w, h);
+                    const cx = w / 2;
+                    const cy = h / 2;
+                    for (const s of bgState.stars) {
+                        s.z -= 4.5;
+                        if (s.z <= 1) {
+                            s.z = w;
+                            s.x = (Math.random() - 0.5) * w * 1.5;
+                            s.y = (Math.random() - 0.5) * h * 1.5;
+                        }
+                        const sx = cx + (s.x / s.z) * (w * 0.6);
+                        const sy = cy + (s.y / s.z) * (w * 0.6);
+                        const size = Math.max(0.6, (1 - s.z / w) * 3.2);
+                        const alpha = Math.max(0.15, 1 - s.z / w);
+                        bgCtx.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha.toFixed(2)})`;
+                        bgCtx.beginPath();
+                        bgCtx.arc(sx, sy, size, 0, Math.PI * 2);
+                        bgCtx.fill();
+                    }
+                    break;
+                }
+
+                case 'static': {
+                    const sc = bgState.staticCanvas;
+                    const sctx = sc.getContext('2d');
+                    const img = sctx.createImageData(sc.width, sc.height);
+                    const data = img.data;
+                    for (let i = 0; i < data.length; i += 4) {
+                        const v = Math.random() * 55;
+                        data[i] = (v * rgb.r) >> 8;
+                        data[i + 1] = (v * rgb.g) >> 8;
+                        data[i + 2] = (v * rgb.b) >> 8;
+                        data[i + 3] = 95;
+                    }
+                    sctx.putImageData(img, 0, 0);
+                    bgCtx.clearRect(0, 0, w, h);
+                    bgCtx.imageSmoothingEnabled = false;
+                    bgCtx.drawImage(sc, 0, 0, w, h);
+                    break;
+                }
+
+                case 'aurora': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    const x1 = w * (0.5 + 0.35 * Math.cos(bgState.phase * 0.7));
+                    const y1 = h * (0.5 + 0.35 * Math.sin(bgState.phase * 0.5));
+                    const g1 = bgCtx.createRadialGradient(x1, y1, 20, x1, y1, Math.max(w, h) * 0.65);
+                    g1.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.22)`);
+                    g1.addColorStop(0.5, `rgba(${dateRgb.r}, ${dateRgb.g}, ${dateRgb.b}, 0.1)`);
+                    g1.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                    bgCtx.fillStyle = g1;
+                    bgCtx.fillRect(0, 0, w, h);
+                    break;
+                }
+
+                case 'tod': {
+                    // Smooth ambient sky gradient determined by current local hour
+                    const now = new Date();
+                    const hr = now.getHours() + now.getMinutes() / 60;
+                    let topCol = '#02040a', botCol = '#07111e';
+                    if (hr >= 5 && hr < 8) {
+                        // Dawn
+                        topCol = '#120924'; botCol = '#3b1c32';
+                    } else if (hr >= 8 && hr < 17) {
+                        // Daytime Deep Sky
+                        topCol = '#041428'; botCol = '#0b2b4c';
+                    } else if (hr >= 17 && hr < 20) {
+                        // Sunset / Dusk
+                        topCol = '#14071e'; botCol = '#331327';
+                    } else {
+                        // Night
+                        topCol = '#010308'; botCol = '#060c18';
+                    }
+                    const grad = bgCtx.createLinearGradient(0, 0, 0, h);
+                    grad.addColorStop(0, topCol);
+                    grad.addColorStop(1, botCol);
+                    bgCtx.fillStyle = grad;
+                    bgCtx.fillRect(0, 0, w, h);
+
+                    // Subtle horizon shimmer
+                    const glowY = h * 0.85 + Math.sin(bgState.phase * 0.5) * 15;
+                    const hGrad = bgCtx.createRadialGradient(w / 2, glowY, 10, w / 2, glowY, w * 0.6);
+                    hGrad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.12)`);
+                    hGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                    bgCtx.fillStyle = hGrad;
+                    bgCtx.fillRect(0, 0, w, h);
+                    break;
+                }
+            }
+        }
+
+        window.addEventListener('resize', resizeBgCanvas);
+
+        /**
+         * Panel De-Energizer / Screen Blanker Mode
+         * Hides the clock & shows pure black (or chosen dark color) to rest LCD panel while keeping wake-lock active
+         */
+        function setBlankerActive(active, reason = 'Manual') {
+            state.isBlanked = active;
+            document.body.classList.toggle('blanker-active', active);
+
+            if (active) {
+                blankerOverlay.style.backgroundColor = state.blankColor;
+                blankerHint.classList.remove('opacity-0');
+                blankerHint.classList.add('opacity-100');
+                setTimeout(() => {
+                    blankerHint.classList.remove('opacity-100');
+                    blankerHint.classList.add('opacity-0');
+                }, 2200);
+                startBgLoop();
+            } else {
+                updateClock();
+                startBgLoop();
+                if (reason === 'Wake') {
+                    showToast('Display Restored • No Sleep Active');
+                }
+            }
+        }
+
+        // Clicking anywhere on the blanker overlay wakes the display
+        blankerOverlay.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.isBlanked) {
+                setBlankerActive(false, 'Wake');
+                resetIdleTimer();
+            }
+        });
+
+        /**
+         * Toast Notification Helper
+         */
+        function showToast(message, isActive = true) {
+            toastText.textContent = message;
+            wakeDot.className = isActive
+                ? 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse'
+                : 'w-2 h-2 rounded-full bg-amber-400';
+            toastEl.classList.remove('opacity-0', '-translate-y-2');
+            toastEl.classList.add('opacity-100', 'translate-y-0');
+
+            clearTimeout(state.toastTimer);
+            state.toastTimer = setTimeout(() => {
+                toastEl.classList.remove('opacity-100', 'translate-y-0');
+                toastEl.classList.add('opacity-0', '-translate-y-2');
+            }, 2400);
+        }
+
+        /**
+         * Screen Wake Lock ("No Sleep") Implementation
+         * Combines the native Screen Wake Lock API + silent Web Audio oscillator fallback
+         */
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    if (!state.wakeLockSentinel) {
+                        state.wakeLockSentinel = await navigator.wakeLock.request('screen');
+                        state.wakeLockSentinel.addEventListener('release', () => {
+                            state.wakeLockSentinel = null;
+                        });
+                    }
+                } catch (err) {
+                    enableSilentAudioKeepAwake();
+                }
+            } else {
+                enableSilentAudioKeepAwake();
+            }
+        }
+
+        function enableSilentAudioKeepAwake() {
+            try {
+                if (!state.audioCtx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContext) {
+                        state.audioCtx = new AudioContext();
+                        const oscillator = state.audioCtx.createOscillator();
+                        const gainNode = state.audioCtx.createGain();
+                        gainNode.gain.value = 0.00001; // Virtually silent
+                        oscillator.connect(gainNode);
+                        gainNode.connect(state.audioCtx.destination);
+                        oscillator.start();
+                    }
+                } else if (state.audioCtx.state === 'suspended') {
+                    state.audioCtx.resume();
+                }
+            } catch (e) {}
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                requestWakeLock();
+                updateClock();
+            }
+        });
+
+        /**
+         * Fullscreen Handling
+         */
+        function isFullscreen() {
+            return !!(
+                document.fullscreenElement ||
+                document.webkitFullscreenElement ||
+                document.mozFullScreenElement ||
+                document.msFullscreenElement
+            );
+        }
+
+        async function toggleFullscreen() {
+            try {
+                if (!isFullscreen()) {
+                    const docEl = document.documentElement;
+                    if (docEl.requestFullscreen) {
+                        await docEl.requestFullscreen();
+                    } else if (docEl.webkitRequestFullscreen) {
+                        await docEl.webkitRequestFullscreen();
+                    } else if (docEl.msRequestFullscreen) {
+                        await docEl.msRequestFullscreen();
+                    }
+                } else {
+                    if (document.exitFullscreen) {
+                        await document.exitFullscreen();
+                    } else if (document.webkitExitFullscreen) {
+                        await document.webkitExitFullscreen();
+                    } else if (document.msExitFullscreen) {
+                        await document.msExitFullscreen();
+                    }
+                }
+            } catch (err) {
+                showToast('Fullscreen restricted by preview container', false);
+            }
+            requestWakeLock();
+        }
+
+        function updateFullscreenButtonLabel() {
+            fullscreenBtn.textContent = isFullscreen() ? 'Exit fullscreen' : 'Enter fullscreen';
+        }
+
+        document.addEventListener('fullscreenchange', updateFullscreenButtonLabel);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenButtonLabel);
+
+        /**
+         * Sync Drawer Pill Selection States with `state`
+         */
+        function syncDrawerUI() {
+            // Clock mode pills
+            document.querySelectorAll('#clock-mode-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.mode === state.clockMode);
+            });
+
+            // Time & precision toggles
+            document.getElementById('opt-24h').classList.toggle('selected', state.use24Hour);
+            document.getElementById('opt-seconds').classList.toggle('selected', state.showSeconds);
+            document.getElementById('opt-ms').classList.toggle('selected', state.showMs);
+            document.getElementById('opt-blink').classList.toggle('selected', state.blinkColon);
+            document.getElementById('opt-slash-zero').classList.toggle('selected', state.slashedZero);
+            document.getElementById('opt-drift').classList.toggle('selected', state.antiBurnDrift);
+
+            formatBtn.textContent = state.use24Hour ? 'Switch to 12h' : 'Switch to 24h';
+
+            // Date format pills
+            document.querySelectorAll('#date-format-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.datefmt === state.dateFormat);
+            });
+
+            // Animated background pills
+            document.querySelectorAll('#bg-anim-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.bg === state.bgAnim);
+            });
+
+            // Theme pills
+            document.querySelectorAll('#theme-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.theme === state.theme);
+            });
+
+            // Font pills
+            document.querySelectorAll('#font-group .opt-pill').forEach(btn => {
+                btn.classList.toggle('selected', btn.dataset.font === state.fontFamily);
+            });
+
+            // Auto-blank select
+            document.getElementById('auto-blank-select').value = String(state.autoBlankMinutes);
+        }
+
+        /**
+         * Drawer Open / Close
+         */
+        function toggleDrawer(forceState) {
+            state.drawerOpen = forceState !== undefined ? forceState : !state.drawerOpen;
+            settingsDrawer.classList.toggle('drawer-closed', !state.drawerOpen);
+            customizeBtn.classList.toggle('active-pill', state.drawerOpen);
+            resetIdleTimer();
+        }
+
+        customizeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleDrawer();
+        });
+
+        closeDrawerBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleDrawer(false);
+        });
+
+        // Close drawer when clicking outside
+        document.addEventListener('click', (e) => {
+            if (state.drawerOpen && !settingsDrawer.contains(e.target) && !customizeBtn.contains(e.target)) {
+                toggleDrawer(false);
+            }
+        });
+
+        /**
+         * Wire up Drawer Controls
+         */
+        // Clock Mode
+        document.querySelectorAll('#clock-mode-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.clockMode = btn.dataset.mode;
+                syncDrawerUI();
+                applyClockMode();
+                saveSettings();
+                showToast(`Mode: ${btn.textContent}`);
+            });
+        });
+
+        // 24h toggle inside drawer
+        document.getElementById('opt-24h').addEventListener('click', () => {
+            state.use24Hour = !state.use24Hour;
+            syncDrawerUI();
+            updateClock();
+            saveSettings();
+            showToast(state.use24Hour ? '24-Hour Format' : '12-Hour Format');
+        });
+
+        // Seconds toggle
+        document.getElementById('opt-seconds').addEventListener('click', () => {
+            state.showSeconds = !state.showSeconds;
+            if (!state.showSeconds) state.showMs = false;
+            syncDrawerUI();
+            startClockLoop();
+            saveSettings();
+            showToast(state.showSeconds ? 'Seconds Enabled' : 'Seconds Hidden');
+        });
+
+        // Milliseconds toggle
+        document.getElementById('opt-ms').addEventListener('click', () => {
+            state.showMs = !state.showMs;
+            if (state.showMs) state.showSeconds = true;
+            syncDrawerUI();
+            startClockLoop();
+            saveSettings();
+            showToast(state.showMs ? 'Milliseconds Enabled' : 'Milliseconds Hidden');
+        });
+
+        // Blink Colon toggle
+        document.getElementById('opt-blink').addEventListener('click', () => {
+            state.blinkColon = !state.blinkColon;
+            syncDrawerUI();
+            updateClock();
+            saveSettings();
+            showToast(state.blinkColon ? 'Blinking Colon On' : 'Solid Colon');
+        });
+
+        // Slashed Zero toggle
+        document.getElementById('opt-slash-zero').addEventListener('click', () => {
+            state.slashedZero = !state.slashedZero;
+            applyVisualVariables();
+            syncDrawerUI();
+            saveSettings();
+            showToast(state.slashedZero ? 'Slashed Zeros On' : 'Standard Zeros');
+        });
+
+        // Anti-Burn Drift toggle
+        document.getElementById('opt-drift').addEventListener('click', () => {
+            state.antiBurnDrift = !state.antiBurnDrift;
+            setupAntiBurnDrift();
+            syncDrawerUI();
+            saveSettings();
+            showToast(state.antiBurnDrift ? 'Anti-Burn Pixel Shift Active' : 'Pixel Shift Off');
+        });
+
+        // Date Formats
+        document.querySelectorAll('#date-format-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.dateFormat = btn.dataset.datefmt;
+                syncDrawerUI();
+                updateClock();
+                saveSettings();
+                showToast(state.dateFormat === 'hidden' ? 'Date Hidden' : 'Date Format Updated');
+            });
+        });
+
+        // Animated Backgrounds
+        document.querySelectorAll('#bg-anim-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.bgAnim = btn.dataset.bg;
+                syncDrawerUI();
+                startBgLoop();
+                saveSettings();
+                showToast(`Background: ${btn.textContent}`);
+            });
+        });
+
+        // Color Theme Presets
+        document.querySelectorAll('#theme-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const key = btn.dataset.theme;
+                const preset = THEMES[key];
+                if (preset) {
+                    state.theme = key;
+                    state.clockColor = preset.clock;
+                    state.dateColor = preset.date;
+                    state.bgColor = preset.bg;
+                    applyVisualVariables();
+                    syncDrawerUI();
+                    updateClock();
+                    saveSettings();
+                    showToast(`Theme: ${preset.name}`);
+                }
+            });
+        });
+
+        // Custom Color Pickers
+        document.getElementById('custom-clock-color').addEventListener('input', (e) => {
+            state.theme = 'custom';
+            state.clockColor = e.target.value;
+            applyVisualVariables();
+            syncDrawerUI();
+            updateClock();
+            saveSettings();
+        });
+
+        document.getElementById('custom-date-color').addEventListener('input', (e) => {
+            state.theme = 'custom';
+            state.dateColor = e.target.value;
+            applyVisualVariables();
+            syncDrawerUI();
+            updateClock();
+            saveSettings();
+        });
+
+        document.getElementById('custom-bg-color').addEventListener('input', (e) => {
+            state.theme = 'custom';
+            state.bgColor = e.target.value;
+            applyVisualVariables();
+            syncDrawerUI();
+            saveSettings();
+        });
+
+        // Fonts
+        document.querySelectorAll('#font-group .opt-pill').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.fontFamily = btn.dataset.font;
+                applyVisualVariables();
+                syncDrawerUI();
+                updateClock();
+                saveSettings();
+                showToast(`Font: ${btn.textContent}`);
+            });
+        });
+
+        // Blank Screen Controls
+        blankerBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setBlankerActive(true);
+        });
+
+        document.getElementById('drawer-blank-now-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleDrawer(false);
+            setBlankerActive(true);
+        });
+
+        document.querySelectorAll('.blank-swatch').forEach(btn => {
+            btn.addEventListener('click', () => {
+                state.blankColor = btn.dataset.blankcolor;
+                applyVisualVariables();
+                saveSettings();
+                showToast(`Blank Screen Tint: ${state.blankColor}`);
+            });
+        });
+
+        document.getElementById('blank-custom-color').addEventListener('input', (e) => {
+            state.blankColor = e.target.value;
+            applyVisualVariables();
+            saveSettings();
+        });
+
+        document.getElementById('auto-blank-select').addEventListener('change', (e) => {
+            state.autoBlankMinutes = parseInt(e.target.value, 10) || 0;
+            saveSettings();
+            resetIdleTimer();
+            showToast(state.autoBlankMinutes > 0 ? `Auto-Blank after ${state.autoBlankMinutes}m idle` : 'Auto-Blank Disabled');
+        });
+
+        /**
+         * Original Bottom Bar Actions
+         */
+        fullscreenBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleFullscreen();
+        });
+
+        // Double-clicking anywhere on the clock background toggles fullscreen
+        document.body.addEventListener('dblclick', (e) => {
+            if (!e.target.closest('nav') && !e.target.closest('aside') && !state.isBlanked) {
+                toggleFullscreen();
+            }
+        });
+
+        // 12h / 24h Switch
+        formatBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.use24Hour = !state.use24Hour;
+            syncDrawerUI();
+            updateClock();
+            saveSettings();
+            showToast(state.use24Hour ? '24-Hour Format' : '12-Hour Format');
+        });
+
+        // Brightness / Dimmer Cycle
+        brightnessBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.brightnessIndex = (state.brightnessIndex + 1) % state.brightnessLevels.length;
+            applyVisualVariables();
+            saveSettings();
+            const pct = Math.round(state.brightnessLevels[state.brightnessIndex] * 100);
+            showToast(`Brightness: ${pct}%`);
+        });
+
+        // Zoom Controls
+        zoomOutBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.zoomPercent > 60) {
+                state.zoomPercent -= 20;
+                applyVisualVariables();
+                saveSettings();
+            }
+        });
+
+        zoomInBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.zoomPercent < 300) {
+                state.zoomPercent += 20;
+                applyVisualVariables();
+                saveSettings();
+            }
+        });
+
+        resetBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.zoomPercent = 200;
+            state.brightnessIndex = 0;
+            state.clockMode = 'digital';
+            state.bgAnim = 'none';
+            state.theme = 'emerald';
+            state.clockColor = THEMES.emerald.clock;
+            state.dateColor = THEMES.emerald.date;
+            state.bgColor = THEMES.emerald.bg;
+            state.fontFamily = "'Orbitron', sans-serif";
+            applyVisualVariables();
+            syncDrawerUI();
+            applyClockMode();
+            startBgLoop();
+            saveSettings();
+            showToast('Reset to Default 200%');
+        });
+
+        /**
+         * Keyboard Shortcuts:
+         * - B: Toggle Blank Screen (Panel De-Energizer)
+         * - C: Toggle Customize Drawer
+         * - F: Toggle Fullscreen
+         * - M: Cycle Clock Modes
+         * - Any key when blanked: Restore Display
+         */
+        window.addEventListener('keydown', (e) => {
+            if (state.isBlanked) {
+                e.preventDefault();
+                setBlankerActive(false, 'Wake');
+                resetIdleTimer();
+                return;
+            }
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+            const key = e.key.toLowerCase();
+            if (key === 'b') {
+                setBlankerActive(true);
+            } else if (key === 'c') {
+                toggleDrawer();
+            } else if (key === 'f') {
+                toggleFullscreen();
+            } else if (key === 'escape' && state.drawerOpen) {
+                toggleDrawer(false);
+            }
+        });
+
+        /**
+         * Auto-hide bottom controls and mouse cursor when idle for 3.5 seconds,
+         * and manage optional prolonged-idle Auto-Blank timer.
+         */
+        function resetIdleTimer() {
+            document.body.classList.remove('user-idle');
+            clearTimeout(state.idleTimer);
+            state.idleTimer = setTimeout(() => {
+                if (!state.drawerOpen) {
+                    document.body.classList.add('user-idle');
+                }
+            }, 3500);
+
+            clearTimeout(state.autoBlankTimer);
+            if (state.autoBlankMinutes > 0 && !state.isBlanked) {
+                state.autoBlankTimer = setTimeout(() => {
+                    setBlankerActive(true, 'AutoIdle');
+                }, state.autoBlankMinutes * 60 * 1000);
+            }
+        }
+
+        ['mousemove', 'mousedown', 'touchstart', 'keydown'].forEach(evt => {
+            window.addEventListener(evt, () => {
+                resetIdleTimer();
+                requestWakeLock();
+                enableSilentAudioKeepAwake();
+            }, { passive: true });
+        });
+
+        /**
+         * Initialize on load
+         */
+        window.onload = function () {
+            loadSavedSettings();
+            resizeBgCanvas();
+            applyVisualVariables();
+            syncDrawerUI();
+            applyClockMode();
+            setupAntiBurnDrift();
+            startBgLoop();
+            requestWakeLock();
+            resetIdleTimer();
+            showToast('No Sleep Active • Device Time');
+        };
+    </script>
+</body>
+</html>

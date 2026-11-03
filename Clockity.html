@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Full Screen Digital Clock</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Orbitron for the exact wide geometric futuristic look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --clock-color: #2bd999;
+            --date-color: #24b880;
+            --glow-primary: rgba(43, 217, 153, 0.55);
+            --glow-secondary: rgba(43, 217, 153, 0.25);
+            --zoom-scale: 1;
+            --brightness: 1;
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000000;
+            overflow: hidden;
+            font-family: 'Orbitron', sans-serif;
+            cursor: default;
+        }
+
+        /* Hide cursor when idle */
+        body.user-idle {
+            cursor: none;
+        }
+
+        /* Main wrapper scales smoothly with zoom controls */
+        #clock-wrapper {
+            transform: scale(var(--zoom-scale));
+            filter: brightness(var(--brightness));
+            transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease;
+            transform-origin: center center;
+            will-change: transform, filter;
+        }
+
+        /* Main Time Display */
+        .clock-digits {
+            color: var(--clock-color);
+            font-weight: 900;
+            /* Responsive massive typography matching the 200% reference aesthetic */
+            font-size: clamp(3.5rem, 21.5vw, 25rem);
+            line-height: 0.92;
+            letter-spacing: 0.02em;
+            text-shadow: 
+                0 0 28px var(--glow-primary),
+                0 0 65px var(--glow-secondary);
+            font-variant-numeric: tabular-nums slashed-zero;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Guaranteed crisp diagonal slash on Every Zero ('0') in the main clock */
+        .zero-char {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .zero-char::after {
+            content: "";
+            position: absolute;
+            width: 74%;
+            height: 13.5%;
+            background-color: var(--clock-color);
+            transform: rotate(-41deg);
+            border-radius: 2px;
+            pointer-events: none;
+            box-shadow: 0 0 8px var(--glow-primary);
+        }
+
+        /* Guaranteed crisp diagonal slash on Every Zero ('0') in the date display */
+        .date-zero-char {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .date-zero-char::after {
+            content: "";
+            position: absolute;
+            width: 78%;
+            height: 8.5%;
+            background-color: var(--date-color);
+            transform: rotate(-42deg);
+            border-radius: 1px;
+            pointer-events: none;
+        }
+
+        /* Square-dot colon styling */
+        .colon-char {
+            display: inline-flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 0.54em;
+            margin: 0 0.06em;
+            transform: translateY(-0.02em);
+        }
+
+        .colon-dot {
+            width: 0.135em;
+            height: 0.135em;
+            background-color: var(--clock-color);
+            border-radius: 0.015em;
+            box-shadow: 
+                0 0 22px var(--glow-primary),
+                0 0 45px var(--glow-secondary);
+        }
+
+        /* AM/PM indicator when in 12h mode */
+        .ampm-badge {
+            font-size: 0.16em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin-left: 0.4em;
+            align-self: flex-end;
+            margin-bottom: 0.45em;
+            color: var(--date-color);
+            text-shadow: 0 0 15px var(--glow-secondary);
+        }
+
+        /* Date Display */
+        .date-display {
+            color: var(--date-color);
+            font-weight: 400;
+            font-size: clamp(0.85rem, 3.1vw, 3.3rem);
+            letter-spacing: 0.035em;
+            margin-top: clamp(0.75rem, 2.6vw, 2.75rem);
+            text-shadow: 0 0 14px rgba(43, 217, 153, 0.25);
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        /* Bottom Right Minimalist Controls matching screenshot */
+        .control-bar {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            transition: opacity 0.45s ease, transform 0.45s ease;
+        }
+
+        body.user-idle .control-bar {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .ctrl-btn {
+            color: #b0b0b0;
+            font-size: 13px;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+            transition: color 0.15s ease, transform 0.1s ease, opacity 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            border: none;
+            padding: 6px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .ctrl-btn:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.07);
+        }
+
+        .ctrl-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Subtle toast notification for status feedback */
+        #status-toast {
+            font-family: 'Inter', sans-serif;
+            transition: opacity 0.35s ease, transform 0.35s ease;
+        }
+    </style>
+</head>
+<body class="relative flex items-center justify-center w-screen h-screen bg-black overflow-hidden">
+
+    <!-- Subtle Status Toast (top-right, auto-hides) -->
+    <div id="status-toast" class="fixed top-5 right-6 z-30 pointer-events-none opacity-0 transform -translate-y-2 bg-zinc-900/90 border border-zinc-800 text-zinc-300 text-xs px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg">
+        <span id="wake-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span id="toast-text">No Sleep Active</span>
+    </div>
+
+    <!-- Main Centered Clock & Date Container -->
+    <main id="clock-wrapper" class="flex flex-col items-center justify-center px-4 text-center select-none">
+        <!-- Time Row -->
+        <div id="time-container" class="clock-digits" aria-live="polite">
+            <span id="hours-text">02</span>
+            <span class="colon-char" aria-hidden="true">
+                <span class="colon-dot"></span>
+                <span class="colon-dot"></span>
+            </span>
+            <span id="minutes-text">08</span>
+            <span id="ampm-text" class="ampm-badge hidden">AM</span>
+        </div>
+
+        <!-- Date Row -->
+        <div id="date-container" class="date-display">
+            Wednesday, October 21, 2026
+        </div>
+    </main>
+
+    <!-- Bottom-Right Minimal Control Bar (Matches Reference Image) -->
+    <nav class="control-bar fixed bottom-3.5 right-5 z-20 flex items-center gap-2 sm:gap-3.5 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-lg" aria-label="Clock controls">
+        
+        <!-- Fullscreen Toggle -->
+        <button id="fullscreen-btn" class="ctrl-btn" title="Toggle Fullscreen (Double-click screen)">
+            Enter fullscreen
+        </button>
+
+        <!-- 12h / 24h Format Toggle -->
+        <button id="format-btn" class="ctrl-btn" title="Toggle 12-hour / 24-hour time">
+            Switch to 12h
+        </button>
+
+        <!-- Brightness / Glow Dimmer Icon (Sun) -->
+        <button id="brightness-btn" class="ctrl-btn" title="Cycle Brightness / Night Mode" aria-label="Adjust Brightness">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="4"></circle>
+                <path d="M12 2v2"></path>
+                <path d="M12 20v2"></path>
+                <path d="m4.93 4.93 1.41 1.41"></path>
+                <path d="m17.66 17.66 1.41 1.41"></path>
+                <path d="M2 12h2"></path>
+                <path d="M20 12h2"></path>
+                <path d="m6.34 17.66-1.41 1.41"></path>
+                <path d="m19.07 4.93-1.41 1.41"></path>
+            </svg>
+        </button>
+
+        <!-- Zoom Out (Magnifying Glass -) -->
+        <button id="zoom-out-btn" class="ctrl-btn" title="Zoom Out" aria-label="Zoom Out">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                <line x1="8" y1="11" x2="14" y2="11"></line>
+            </svg>
+        </button>
+
+        <!-- Current Zoom Level Display (matches "200%" in reference) -->
+        <span id="zoom-label" class="text-[#d8d8d8] text-[13px] font-medium min-w-[38px] text-center select-none">
+            200%
+        </span>
+
+        <!-- Zoom In (Magnifying Glass +) -->
+        <button id="zoom-in-btn" class="ctrl-btn" title="Zoom In" aria-label="Zoom In">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                <line x1="11" y1="8" x2="11" y2="14"></line>
+                <line x1="8" y1="11" x2="14" y2="11"></line>
+            </svg>
+        </button>
+
+        <!-- Reset Zoom & Settings (Circular Counter-Clockwise Arrow) -->
+        <button id="reset-btn" class="ctrl-btn" title="Reset Zoom (200%)" aria-label="Reset Zoom">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                <path d="M3 3v5h5"></path>
+            </svg>
+        </button>
+    </nav>
+
+    <script>
+        /**
+         * Application State
+         */
+        const state = {
+            use24Hour: true,
+            // 200% corresponds to scale 1.0 (the massive full-bleed look in the screenshot)
+            zoomPercent: 200,
+            brightnessLevels: [1, 0.65, 0.35, 0.15],
+            brightnessIndex: 0,
+            wakeLockSentinel: null,
+            idleTimer: null,
+            toastTimer: null,
+            audioCtx: null
+        };
+
+        // DOM Elements
+        const hoursEl = document.getElementById('hours-text');
+        const minutesEl = document.getElementById('minutes-text');
+        const ampmEl = document.getElementById('ampm-text');
+        const dateEl = document.getElementById('date-container');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const formatBtn = document.getElementById('format-btn');
+        const brightnessBtn = document.getElementById('brightness-btn');
+        const zoomOutBtn = document.getElementById('zoom-out-btn');
+        const zoomInBtn = document.getElementById('zoom-in-btn');
+        const zoomLabel = document.getElementById('zoom-label');
+        const resetBtn = document.getElementById('reset-btn');
+        const toastEl = document.getElementById('status-toast');
+        const toastText = document.getElementById('toast-text');
+        const wakeDot = document.getElementById('wake-dot');
+
+        /**
+         * Helper: Wrap every '0' in a span with a crisp diagonal slash so it matches
+         * the exact geometric slashed-zero aesthetic across all devices.
+         */
+        function formatWithSlashedZeros(str, className) {
+            return str
+                .split('')
+                .map(ch => ch === '0' ? `<span class="${className}">0</span>` : ch)
+                .join('');
+        }
+
+        /**
+         * Core Clock Update Function (Reads accurate local device time)
+         */
+        function updateClock() {
+            const now = new Date();
+            let hours = now.getHours();
+            const minutes = now.getMinutes();
+
+            if (!state.use24Hour) {
+                const ampm = hours >= 12 ? 'PM' : 'AM';
+                hours = hours % 12;
+                hours = hours ? hours : 12; // 0 becomes 12
+                ampmEl.textContent = ampm;
+                ampmEl.classList.remove('hidden');
+            } else {
+                ampmEl.classList.add('hidden');
+            }
+
+            const hoursStr = String(hours).padStart(2, '0');
+            const minutesStr = String(minutes).padStart(2, '0');
+
+            hoursEl.innerHTML = formatWithSlashedZeros(hoursStr, 'zero-char');
+            minutesEl.innerHTML = formatWithSlashedZeros(minutesStr, 'zero-char');
+
+            // Format Date: e.g. "Wednesday, October 21, 2026"
+            const dateOptions = {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            };
+            const formattedDate = now.toLocaleDateString('en-US', dateOptions);
+            dateEl.innerHTML = formatWithSlashedZeros(formattedDate, 'date-zero-char');
+        }
+
+        /**
+         * Sync clock updates accurately to the start of each second
+         */
+        function startClockLoop() {
+            updateClock();
+            const now = new Date();
+            const msUntilNextSecond = 1000 - now.getMilliseconds();
+            setTimeout(() => {
+                updateClock();
+                setInterval(updateClock, 1000);
+            }, msUntilNextSecond);
+        }
+
+        /**
+         * Toast Notification Helper
+         */
+        function showToast(message, isActive = true) {
+            toastText.textContent = message;
+            wakeDot.className = isActive
+                ? 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse'
+                : 'w-2 h-2 rounded-full bg-amber-400';
+            toastEl.classList.remove('opacity-0', '-translate-y-2');
+            toastEl.classList.add('opacity-100', 'translate-y-0');
+
+            clearTimeout(state.toastTimer);
+            state.toastTimer = setTimeout(() => {
+                toastEl.classList.remove('opacity-100', 'translate-y-0');
+                toastEl.classList.add('opacity-0', '-translate-y-2');
+            }, 2400);
+        }
+
+        /**
+         * Screen Wake Lock ("No Sleep") Implementation
+         * Combines the native Screen Wake Lock API + silent Web Audio oscillator fallback
+         * so the device screen stays awake reliably.
+         */
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    if (!state.wakeLockSentinel) {
+                        state.wakeLockSentinel = await navigator.wakeLock.request('screen');
+                        state.wakeLockSentinel.addEventListener('release', () => {
+                            state.wakeLockSentinel = null;
+                        });
+                    }
+                } catch (err) {
+                    // Fallback if iframe policy or battery saver blocks WakeLock
+                    enableSilentAudioKeepAwake();
+                }
+            } else {
+                enableSilentAudioKeepAwake();
+            }
+        }
+
+        function enableSilentAudioKeepAwake() {
+            try {
+                if (!state.audioCtx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (AudioContext) {
+                        state.audioCtx = new AudioContext();
+                        const oscillator = state.audioCtx.createOscillator();
+                        const gainNode = state.audioCtx.createGain();
+                        gainNode.gain.value = 0.00001; // Virtually silent
+                        oscillator.connect(gainNode);
+                        gainNode.connect(state.audioCtx.destination);
+                        oscillator.start();
+                    }
+                } else if (state.audioCtx.state === 'suspended') {
+                    state.audioCtx.resume();
+                }
+            } catch (e) {
+                // Ignore audio context restrictions before user gesture
+            }
+        }
+
+        // Re-acquire wake lock when returning to tab/app
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                requestWakeLock();
+                updateClock();
+            }
+        });
+
+        /**
+         * Fullscreen Handling
+         */
+        function isFullscreen() {
+            return !!(
+                document.fullscreenElement ||
+                document.webkitFullscreenElement ||
+                document.mozFullScreenElement ||
+                document.msFullscreenElement
+            );
+        }
+
+        async function toggleFullscreen() {
+            try {
+                if (!isFullscreen()) {
+                    const docEl = document.documentElement;
+                    if (docEl.requestFullscreen) {
+                        await docEl.requestFullscreen();
+                    } else if (docEl.webkitRequestFullscreen) {
+                        await docEl.webkitRequestFullscreen();
+                    } else if (docEl.msRequestFullscreen) {
+                        await docEl.msRequestFullscreen();
+                    }
+                } else {
+                    if (document.exitFullscreen) {
+                        await document.exitFullscreen();
+                    } else if (document.webkitExitFullscreen) {
+                        await document.webkitExitFullscreen();
+                    } else if (document.msExitFullscreen) {
+                        await document.msExitFullscreen();
+                    }
+                }
+            } catch (err) {
+                showToast('Fullscreen restricted by preview container', false);
+            }
+            requestWakeLock();
+        }
+
+        function updateFullscreenButtonLabel() {
+            fullscreenBtn.textContent = isFullscreen() ? 'Exit fullscreen' : 'Enter fullscreen';
+        }
+
+        document.addEventListener('fullscreenchange', updateFullscreenButtonLabel);
+        document.addEventListener('webkitfullscreenchange', updateFullscreenButtonLabel);
+
+        /**
+         * Control Bar Actions
+         */
+        fullscreenBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleFullscreen();
+        });
+
+        // Double-clicking anywhere on the clock background toggles fullscreen
+        document.body.addEventListener('dblclick', (e) => {
+            if (!e.target.closest('nav')) {
+                toggleFullscreen();
+            }
+        });
+
+        // 12h / 24h Switch
+        formatBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.use24Hour = !state.use24Hour;
+            formatBtn.textContent = state.use24Hour ? 'Switch to 12h' : 'Switch to 24h';
+            updateClock();
+            showToast(state.use24Hour ? '24-Hour Format' : '12-Hour Format');
+        });
+
+        // Brightness / Dimmer Cycle
+        brightnessBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.brightnessIndex = (state.brightnessIndex + 1) % state.brightnessLevels.length;
+            const level = state.brightnessLevels[state.brightnessIndex];
+            document.documentElement.style.setProperty('--brightness', level);
+            const pct = Math.round(level * 100);
+            showToast(`Brightness: ${pct}%`);
+        });
+
+        // Zoom Controls (Baseline 200% = scale 1.0 to match reference image)
+        function applyZoom() {
+            const scaleFactor = state.zoomPercent / 200;
+            document.documentElement.style.setProperty('--zoom-scale', scaleFactor);
+            zoomLabel.textContent = `${state.zoomPercent}%`;
+        }
+
+        zoomOutBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.zoomPercent > 60) {
+                state.zoomPercent -= 20;
+                applyZoom();
+            }
+        });
+
+        zoomInBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (state.zoomPercent < 300) {
+                state.zoomPercent += 20;
+                applyZoom();
+            }
+        });
+
+        resetBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            state.zoomPercent = 200;
+            state.brightnessIndex = 0;
+            document.documentElement.style.setProperty('--brightness', 1);
+            applyZoom();
+            showToast('Reset to 200%');
+        });
+
+        /**
+         * Auto-hide bottom controls and mouse cursor when idle for 3.5 seconds
+         */
+        function resetIdleTimer() {
+            document.body.classList.remove('user-idle');
+            clearTimeout(state.idleTimer);
+            state.idleTimer = setTimeout(() => {
+                document.body.classList.add('user-idle');
+            }, 3500);
+        }
+
+        ['mousemove', 'mousedown', 'touchstart', 'keydown'].forEach(evt => {
+            window.addEventListener(evt, () => {
+                resetIdleTimer();
+                requestWakeLock();
+                enableSilentAudioKeepAwake();
+            }, { passive: true });
+        });
+
+        /**
+         * Initialize on load
+         */
+        window.onload = function () {
+            startClockLoop();
+            requestWakeLock();
+            resetIdleTimer();
+            showToast('No Sleep Active • Device Time');
+        };
+    </script>
+</body>
+</html>
