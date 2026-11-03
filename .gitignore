@@ -1,1 +1,13 @@
+# Agent Steering & Local Overrides
 AGENTS.md
+GEMINI.md
+
+# Task Tracking Archives (When Kept Local)
+kanban_archive.md
+
+# Private Internal Landmarks & Sidechick Scratchpads
+internal/
+scratch/
+ideas/
+*.tmp
+*.bak
