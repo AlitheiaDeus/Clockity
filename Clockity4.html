@@ -2378,16 +2378,13 @@
                     z: Math.random() * w
                 }));
             } else if (state.bgAnim === 'matrix') {
-                // Classic C-Matrix: Fixed column grid, integer grid-row stepping, authentic phosphor trails
-                const colWidth = 20;
-                const numCols = Math.floor(w / colWidth);
+                // Classic Matrix: Distinct falling drops in pure theme accent with clean spacing
+                const colStep = 24;
+                const numCols = Math.floor(w / colStep);
                 bgState.matrixStreams = Array.from({ length: numCols }, (_, i) => ({
-                    col: i,
-                    x: i * colWidth + 4,
-                    y: Math.floor(Math.random() * -60), // Integer row position
-                    speed: 0.6 + Math.random() * 0.7,
-                    stepCounter: 0,
-                    length: Math.floor(12 + Math.random() * 18)
+                    x: i * colStep + 6,
+                    y: Math.floor(Math.random() * -40),
+                    speed: 0.35 + Math.random() * 0.45
                 }));
             } else if (state.bgAnim === 'fire') {
                 bgState.embers = Array.from({ length: 50 }, () => ({
@@ -2469,42 +2466,31 @@
 
             switch (state.bgAnim) {
                 case 'matrix': {
-                    // Classic C-Matrix: Semitransparent fade creates authentic smooth phosphor tails
-                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.16);
+                    // Semitransparent background wash: smoothly decays glyphs into true background
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.28);
                     bgCtx.fillRect(0, 0, w, h);
-                    bgCtx.font = 'bold 16px monospace';
+                    bgCtx.font = '15px monospace';
                     const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎ';
                     const streams = bgState.matrixStreams || [];
 
+                    // Strictly theme accent color — zero rogue white characters
+                    bgCtx.fillStyle = `rgb(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b})`;
+
                     for (let i = 0; i < streams.length; i++) {
                         const st = streams[i];
-                        st.stepCounter += st.speed;
-                        if (st.stepCounter >= 1) {
-                            st.y += Math.floor(st.stepCounter);
-                            st.stepCounter %= 1;
-                        }
+                        const charY = Math.floor(st.y) * 20;
 
-                        const charY = st.y * 20;
-                        if (charY >= 0 && charY <= h + 40) {
-                            // Lead character: Blinding white/bright head
+                        if (charY >= 0 && charY <= h + 20) {
                             const ch = chars[Math.floor(Math.random() * chars.length)];
-                            bgCtx.fillStyle = '#ffffff';
                             bgCtx.fillText(ch, st.x, charY);
-
-                            // The trailing position painted 1 cell behind in vivid BG Accent
-                            const prevY = charY - 20;
-                            if (prevY >= 0) {
-                                const prevCh = chars[Math.floor(Math.random() * chars.length)];
-                                bgCtx.fillStyle = `rgb(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b})`;
-                                bgCtx.fillText(prevCh, st.x, prevY);
-                            }
                         }
 
-                        // Reset column when drop runs off the bottom screen edge
-                        if (st.y * 20 > h + st.length * 20) {
-                            st.y = Math.floor(Math.random() * -30);
-                            st.speed = 0.6 + Math.random() * 0.7;
-                            st.length = Math.floor(12 + Math.random() * 18);
+                        st.y += st.speed;
+
+                        // When drop reaches bottom, randomly respawn above the screen
+                        if (charY > h && Math.random() > 0.94) {
+                            st.y = -Math.floor(Math.random() * 20);
+                            st.speed = 0.35 + Math.random() * 0.45;
                         }
                     }
                     break;
