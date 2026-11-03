@@ -2398,22 +2398,41 @@
                     };
                 });
             } else if (state.bgAnim === 'fire') {
-                bgState.embers = Array.from({ length: 50 }, () => ({
-                    x: Math.random() * w,
-                    y: h + Math.random() * 50,
-                    r: 1.5 + Math.random() * 3.5,
-                    vy: 0.8 + Math.random() * 2,
-                    vx: (Math.random() - 0.5) * 0.8,
-                    alpha: 0.2 + Math.random() * 0.6
-                }));
+                // 3D Parallax Embers: 3 Depth Planes (Far micro-sparks -> Near heavy glowing cinders)
+                bgState.embers = Array.from({ length: 55 }, () => {
+                    const depthRoll = Math.random();
+                    const tier = depthRoll < 0.50 ? 0 : (depthRoll < 0.82 ? 1 : 2); // 50% far, 32% mid, 18% near
+                    const r = tier === 0 ? (0.8 + Math.random() * 1.2) :
+                              tier === 1 ? (1.8 + Math.random() * 1.6) :
+                                           (3.2 + Math.random() * 2.8);
+                    const vy = tier === 0 ? (0.4 + Math.random() * 0.6) :
+                               tier === 1 ? (0.8 + Math.random() * 1.0) :
+                                            (1.5 + Math.random() * 1.6);
+                    const alpha = tier === 0 ? 0.35 : (tier === 1 ? 0.65 : 1.0);
+                    return {
+                        tier,
+                        x: Math.random() * w,
+                        y: h + Math.random() * 50,
+                        r,
+                        vy,
+                        vx: (Math.random() - 0.5) * (tier === 2 ? 1.2 : 0.6),
+                        alpha
+                    };
+                });
             } else if (state.bgAnim === 'water') {
-                bgState.ripples = Array.from({ length: 6 }, () => ({
-                    x: Math.random() * w,
-                    y: Math.random() * h,
-                    r: Math.random() * 120,
-                    maxR: 150 + Math.random() * 150,
-                    speed: 0.6 + Math.random() * 0.8
-                }));
+                // 3D Perspective Ripples: Elliptical foreshortening (eccentricity) based on horizon depth
+                bgState.ripples = Array.from({ length: 7 }, () => {
+                    const y = h * 0.35 + Math.random() * (h * 0.65);
+                    const depthRatio = (y - h * 0.35) / (h * 0.65); // 0 at horizon, 1 at viewport bottom
+                    return {
+                        x: Math.random() * w,
+                        y,
+                        depthRatio,
+                        r: Math.random() * 60,
+                        maxR: 90 + depthRatio * 180,
+                        speed: 0.35 + depthRatio * 0.85
+                    };
+                });
             } else if (state.bgAnim === 'static') {
                 const sc = document.createElement('canvas');
                 sc.width = 240;
@@ -2566,17 +2585,28 @@
                     bgCtx.fillStyle = baseGrad;
                     bgCtx.fillRect(0, 0, w, h);
 
+                    // Sort/render by depth tier: Far (dim, slow, small) -> Near (bright, fast, large)
                     for (const p of bgState.embers) {
                         p.y -= p.vy;
-                        p.x += p.vx + Math.sin(bgState.phase + p.y * 0.02) * 0.5;
+                        p.x += p.vx + Math.sin(bgState.phase + p.y * 0.02) * (p.tier === 2 ? 0.9 : 0.4);
                         const life = Math.max(0, p.y / h);
                         bgCtx.beginPath();
-                        bgCtx.arc(p.x, p.y, p.r * life + 0.6, 0, Math.PI * 2);
-                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${(Math.min(1, p.alpha * life * 1.35)).toFixed(2)})`;
+                        bgCtx.arc(p.x, p.y, p.r * life + 0.5, 0, Math.PI * 2);
+                        const finalAlpha = Math.min(1, p.alpha * life * 1.35);
+                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${finalAlpha.toFixed(2)})`;
                         bgCtx.fill();
-                        if (p.y < -10) {
-                            p.y = h + 15;
+                        if (p.y < -15) {
+                            p.y = h + 20;
                             p.x = Math.random() * w;
+                            const depthRoll = Math.random();
+                            p.tier = depthRoll < 0.50 ? 0 : (depthRoll < 0.82 ? 1 : 2);
+                            p.r = p.tier === 0 ? (0.8 + Math.random() * 1.2) :
+                                  p.tier === 1 ? (1.8 + Math.random() * 1.6) :
+                                                 (3.2 + Math.random() * 2.8);
+                            p.vy = p.tier === 0 ? (0.4 + Math.random() * 0.6) :
+                                   p.tier === 1 ? (0.8 + Math.random() * 1.0) :
+                                                  (1.5 + Math.random() * 1.6);
+                            p.alpha = p.tier === 0 ? 0.35 : (p.tier === 1 ? 0.65 : 1.0);
                         }
                     }
                     break;
@@ -2586,16 +2616,23 @@
                     bgCtx.clearRect(0, 0, w, h);
                     for (const rp of bgState.ripples) {
                         rp.r += rp.speed;
-                        const alpha = Math.max(0, (1 - rp.r / rp.maxR) * 0.65);
+                        const alpha = Math.max(0, (1 - rp.r / rp.maxR) * (0.35 + rp.depthRatio * 0.45));
+                        
+                        // 3D Perspective Foreshortening: Ellipse flattened on the Y-axis according to distance
+                        const radiusY = rp.r * (0.32 + rp.depthRatio * 0.28);
                         bgCtx.beginPath();
-                        bgCtx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
+                        bgCtx.ellipse(rp.x, rp.y, rp.r, radiusY, 0, 0, Math.PI * 2);
                         bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${alpha.toFixed(3)})`;
-                        bgCtx.lineWidth = 2.0;
+                        bgCtx.lineWidth = 1.2 + rp.depthRatio * 1.5;
                         bgCtx.stroke();
+
                         if (rp.r >= rp.maxR) {
                             rp.r = 2;
                             rp.x = Math.random() * w;
-                            rp.y = Math.random() * h;
+                            rp.y = h * 0.35 + Math.random() * (h * 0.65);
+                            rp.depthRatio = (rp.y - h * 0.35) / (h * 0.65);
+                            rp.maxR = 90 + rp.depthRatio * 180;
+                            rp.speed = 0.35 + rp.depthRatio * 0.85;
                         }
                     }
                     break;
