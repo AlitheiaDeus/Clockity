@@ -1,4 +1,4 @@
-# Clockity 3 — Manual Verification & Regression Checklist
+# Clockity 4 — Manual Verification & Regression Checklist
 
 Use this checklist whenever you add features, tweak styles, or modify the scheduling loops to ensure the **zero-idle architecture**, **visual alignment**, and **subsystems** remain completely intact.
 
