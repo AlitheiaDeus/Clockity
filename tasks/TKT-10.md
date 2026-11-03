@@ -1,19 +1,14 @@
-# TKT-10: Smooth Z-Depth Transitions & Relativistic Warp-Drive Physics
+# TKT-10: Relativistic Warp-Drive Starfield (Hyperbolic Acceleration & Proximity Streaks)
 
 ## 1. Problem Statement
-Clockity currently employs two distinct 3D depth paradigms:
-1. **Tiered Depth Planes** (used in Matrix and current Embers): discrete buckets (Far, Mid, Near).
-2. **Smooth Continuous Z-Depth & Hyperbolic Acceleration**:
-   - Continuous Z-coordinate per particle (`z` from `w` down to `0`).
-   - Projection: $X_{\text{screen}} = C_x + \frac{x}{z} \cdot \text{scale}$, with apparent velocity scaling as $\frac{1}{z^2}$ (accelerating as it zips past the camera).
-   - Relativistic radial motion streaks / speed lines when particles pass close to the camera.
+The current starfield moves along linear Z steps, feeling like flat drifting dots rather than an immersive hyperspace journey through the cosmos.
 
-## 2. Proposed Scope
-1. **Continuous Z Ember Floating**: Embers smoothly drift between depth layers (moving toward or away from the camera in 3D volume rather than staying locked in a fixed plane).
-2. **Relativistic Warp-Drive Starfield**:
-   - Stars don't just move linearly; they accelerate hyperbolically as $Z \to 0$.
-   - When close to the camera, stars draw motion streaks (laser star lines) radiating from the center, creating an authentic warp-drive / hyperspace jump effect.
+## 2. Proposed Architecture & Relativistic Physics
+- **Hyperbolic Acceleration**: As $Z \to 0$, screen-space radial velocity increases proportionally to $\frac{1}{z}$, creating genuine acceleration as stars approach the camera.
+- **Warp Speed Streaks**: Track each star's previous projected coordinate `(prevSx, prevSy)` and draw a dynamic motion streak line to `(sx, sy)`. Close stars stretch into brilliant warp-speed lasers pointing away from the center of expansion.
+- **Phosphor Accent Color**: Stars strictly adhere to `bgAccentColor` without rogue white dots.
 
 ## 3. Acceptance Criteria
-- [ ] Starfield features smooth acceleration and proximity speed streaks.
-- [ ] Embers drift seamlessly through 3D Z-depth.
+- [ ] Stars accelerate smoothly as they approach the viewport boundary.
+- [ ] Proximity motion blur streaks appear dynamically on close stars.
+- [ ] Zero CPU/GPU lag.
