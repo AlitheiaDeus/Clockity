@@ -3,6 +3,12 @@
 ```mermaid
 kanban
   todo["Todo (Active Pipeline)"]
+    bug03["Chime Preview Plays Sound When Off"]@{ ticket: '[BUG-03]', priority: 'Medium' }
+    bug04["BG Accent Low Alpha & Inadequate Vibrancy"]@{ ticket: '[BUG-04]', priority: 'High' }
+    tkt07["Matrix True Random Screen Space Drops"]@{ ticket: '[TKT-07]', priority: 'High' }
+    tkt08["Live FPS Tracker & HUD Toggle"]@{ ticket: '[TKT-08]', priority: 'Medium' }
+  reported["Reported (Backlog Candidates)"]
+    pln01["New Ambient Screensavers (Pixel Rain, Lasers, Tetriminos)"]@{ ticket: '[PLN-01]', priority: 'Low' }
   in_progress["In Progress (WIP = 1)"]
   completed["Completed (Fresh / Review)"]
     bug01["Matrix Fade Infinite Ghost Trails"]@{ ticket: '[BUG-01]', priority: 'High' }
@@ -19,11 +25,8 @@ kanban
 
 | Ticket ID | Grade | Title | Operational Inspiration | Spec Document |
 | :--- | :--- | :--- | :--- | :--- |
-| **`BUG-01`** | `BUG` | Matrix Fade Infinite Ghost Trails | Elimination of residual canvas alpha trails | [BUG-01.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/BUG-01.md) |
-| **`TKT-01`** | `TKT` | Matrix Screen Space Continuous Density | Procedural drop positioning across viewport | [TKT-01.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/TKT-01.md) |
-| **`TKT-02`** | `TKT` | Text Glow Toggle & Persistence | Drawer setting for flat vs neon styling | [TKT-02.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/TKT-02.md) |
-| **`BUG-02`** | `BUG` | Cyber Grid VP Hotspot & Burn-In Mitigation | OLED safe diffusion & perspective lighting | [BUG-02.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/BUG-02.md) |
-| **`TKT-03`** | `TKT` | Theme BG Accent Luminance Calibration | Balanced background particle visibility | [TKT-03.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/TKT-03.md) |
-| **`TKT-04`** | `TKT` | Repository README Architecture & Guide | Project showcase & quickstart documentation | [TKT-04.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/TKT-04.md) |
-| **`TKT-05`** | `TKT` | Repository Description & Metadata | GitHub description & topic tags | [TKT-05.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/TKT-05.md) |
-| **`TKT-06`** | `TKT` | Side-Panel Ambient FPS Calibration | Frame rate tuning for low-overhead side panels | [TKT-06.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/TKT-06.md) |
+| **`BUG-03`** | `BUG` | Chime Preview Plays Sound When Off | Prevent unprompted sound when chime disabled | [BUG-03.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/BUG-03.md) |
+| **`BUG-04`** | `BUG` | BG Accent Low Alpha & Inadequate Vibrancy | Alpha tuning & theme accent luminance boost | [BUG-04.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/BUG-04.md) |
+| **`TKT-07`** | `TKT` | Matrix True Random Screen Space Drops | Continuous randomized screensaver distribution | [TKT-07.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/TKT-07.md) |
+| **`TKT-08`** | `TKT` | Live FPS Tracker & HUD Toggle | Real-time FPS performance measurement HUD | [TKT-08.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/TKT-08.md) |
+| **`PLN-01`** | `PLN` | New Ambient Screensavers | Pixel rain, random lasers, rotating tetriminos | [PLN-01.md](file:///c:/Users/AlitheiaDeus/DeusLocker/L2C/Clockity/tasks/backlog/PLN-01.md) |
