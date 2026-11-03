@@ -2378,14 +2378,16 @@
                     z: Math.random() * w
                 }));
             } else if (state.bgAnim === 'matrix') {
-                // Authentic C-Matrix Screensaver: True randomized screen-space drops across deadspace
-                const density = Math.floor(w / 18);
-                bgState.matrixStreams = Array.from({ length: density }, () => ({
-                    x: Math.random() * w,
-                    y: Math.random() * -100,
-                    speed: 0.8 + Math.random() * 0.9,
-                    length: Math.floor(10 + Math.random() * 18),
-                    chars: []
+                // Classic C-Matrix: Fixed column grid, integer grid-row stepping, authentic phosphor trails
+                const colWidth = 20;
+                const numCols = Math.floor(w / colWidth);
+                bgState.matrixStreams = Array.from({ length: numCols }, (_, i) => ({
+                    col: i,
+                    x: i * colWidth + 4,
+                    y: Math.floor(Math.random() * -60), // Integer row position
+                    speed: 0.6 + Math.random() * 0.7,
+                    stepCounter: 0,
+                    length: Math.floor(12 + Math.random() * 18)
                 }));
             } else if (state.bgAnim === 'fire') {
                 bgState.embers = Array.from({ length: 50 }, () => ({
@@ -2467,52 +2469,42 @@
 
             switch (state.bgAnim) {
                 case 'matrix': {
-                    // C-Matrix Terminal Fade with full black floor clearance
-                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.35);
+                    // Classic C-Matrix: Semitransparent fade creates authentic smooth phosphor tails
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.16);
                     bgCtx.fillRect(0, 0, w, h);
-                    bgCtx.font = 'bold 15px monospace';
-                    const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎXYZ@#$%&*';
+                    bgCtx.font = 'bold 16px monospace';
+                    const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎ';
                     const streams = bgState.matrixStreams || [];
+
                     for (let i = 0; i < streams.length; i++) {
                         const st = streams[i];
-                        const headY = st.y * 18;
-                        
-                        // Render stream body in discrete terminal phosphor brightness steps
-                        for (let j = 0; j < st.length; j++) {
-                            const charY = headY - j * 18;
-                            if (charY < -20 || charY > h + 20) continue;
-                            
-                            // Mutate random glyphs in-place
-                            if (!st.chars[j] || Math.random() < 0.05) {
-                                st.chars[j] = chars[Math.floor(Math.random() * chars.length)];
-                            }
-                            
-                            if (j === 0) {
-                                // Blinding white / high-beam lead glyph
-                                bgCtx.fillStyle = '#ffffff';
-                            } else if (j <= 3) {
-                                // Upper tail: 100% full vibrant accent
-                                bgCtx.fillStyle = `rgb(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b})`;
-                            } else if (j <= 8) {
-                                // Mid tail: vibrant accent step-down
-                                bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.85)`;
-                            } else {
-                                // Deep tail: soft phosphor glow
-                                const alpha = Math.max(0.18, 1 - (j / st.length));
-                                bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${alpha.toFixed(2)})`;
-                            }
-                            bgCtx.fillText(st.chars[j], st.x, charY);
+                        st.stepCounter += st.speed;
+                        if (st.stepCounter >= 1) {
+                            st.y += Math.floor(st.stepCounter);
+                            st.stepCounter %= 1;
                         }
 
-                        st.y += st.speed;
+                        const charY = st.y * 20;
+                        if (charY >= 0 && charY <= h + 40) {
+                            // Lead character: Blinding white/bright head
+                            const ch = chars[Math.floor(Math.random() * chars.length)];
+                            bgCtx.fillStyle = '#ffffff';
+                            bgCtx.fillText(ch, st.x, charY);
 
-                        // When stream completely scrolls off bottom, re-seed at a fresh random X screen coordinate
-                        if (headY - st.length * 18 > h) {
-                            st.x = Math.random() * w; // Free-flow screen space coverage
-                            st.y = -Math.random() * 8;
-                            st.speed = 0.8 + Math.random() * 0.9;
-                            st.length = Math.floor(10 + Math.random() * 18);
-                            st.chars = [];
+                            // The trailing position painted 1 cell behind in vivid BG Accent
+                            const prevY = charY - 20;
+                            if (prevY >= 0) {
+                                const prevCh = chars[Math.floor(Math.random() * chars.length)];
+                                bgCtx.fillStyle = `rgb(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b})`;
+                                bgCtx.fillText(prevCh, st.x, prevY);
+                            }
+                        }
+
+                        // Reset column when drop runs off the bottom screen edge
+                        if (st.y * 20 > h + st.length * 20) {
+                            st.y = Math.floor(Math.random() * -30);
+                            st.speed = 0.6 + Math.random() * 0.7;
+                            st.length = Math.floor(12 + Math.random() * 18);
                         }
                     }
                     break;
