@@ -2378,15 +2378,25 @@
                     z: Math.random() * w
                 }));
             } else if (state.bgAnim === 'matrix') {
-                // Freeform X screen space + Discrete Y stepping (Authentic Echo Trails)
-                const streamCount = Math.floor(w / 26);
-                bgState.matrixStreams = Array.from({ length: streamCount }, () => ({
-                    x: Math.random() * (w - 24),
-                    row: Math.floor(Math.random() * -30),
-                    speed: 0.4 + Math.random() * 0.5,
-                    lastRow: -999,
-                    currentChar: ''
-                }));
+                // 3D Parallax Matrix: Streams distributed across Depth Tiers (0: Far, 1: Mid, 2: Near)
+                const streamCount = Math.floor(w / 22);
+                bgState.matrixStreams = Array.from({ length: streamCount }, () => {
+                    const depthRoll = Math.random();
+                    const tier = depthRoll < 0.45 ? 0 : (depthRoll < 0.80 ? 1 : 2); // 45% far, 35% mid, 20% near
+                    const cellH = tier === 0 ? 14 : (tier === 1 ? 18 : 24);
+                    const speed = tier === 0 ? (0.22 + Math.random() * 0.16) :
+                                  tier === 1 ? (0.42 + Math.random() * 0.22) :
+                                               (0.70 + Math.random() * 0.35);
+                    return {
+                        tier,
+                        cellH,
+                        x: Math.random() * (w - 24),
+                        row: Math.floor(Math.random() * -30),
+                        speed,
+                        lastRow: -999,
+                        currentChar: ''
+                    };
+                });
             } else if (state.bgAnim === 'fire') {
                 bgState.embers = Array.from({ length: 50 }, () => ({
                     x: Math.random() * w,
@@ -2467,39 +2477,55 @@
 
             switch (state.bgAnim) {
                 case 'matrix': {
-                    // Semitransparent background wash creates smooth ~6-8 tick trailing echo
+                    // Semitransparent background wash creates smooth trailing echo
                     bgCtx.fillStyle = hexToRgba(state.bgColor, 0.28);
                     bgCtx.fillRect(0, 0, w, h);
-                    bgCtx.font = '15px monospace';
                     const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎ';
                     const streams = bgState.matrixStreams || [];
 
-                    // Strictly theme accent color
-                    bgCtx.fillStyle = `rgb(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b})`;
+                    // 3-Tier Depth Batch Rendering (Far -> Mid -> Near) for 3D Cyberspace Parallax
+                    const tiers = [
+                        { font: '11px monospace', alpha: 0.45 },
+                        { font: '14px monospace', alpha: 0.75 },
+                        { font: 'bold 18px monospace', alpha: 1.00 }
+                    ];
 
-                    for (let i = 0; i < streams.length; i++) {
-                        const st = streams[i];
-                        st.row += st.speed;
-                        const currentRow = Math.floor(st.row);
-                        const charY = currentRow * 20;
+                    for (let t = 0; t < 3; t++) {
+                        bgCtx.font = tiers[t].font;
+                        const a = tiers[t].alpha;
+                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${a})`;
 
-                        // Only generate and stamp when entering a fresh integer cell
-                        if (currentRow !== st.lastRow) {
-                            st.lastRow = currentRow;
-                            st.currentChar = chars[Math.floor(Math.random() * chars.length)];
-                        }
+                        for (let i = 0; i < streams.length; i++) {
+                            const st = streams[i];
+                            if (st.tier !== t) continue;
 
-                        // Draw character at active head position; past positions naturally echo & fade
-                        if (charY >= 0 && charY <= h + 20) {
-                            bgCtx.fillText(st.currentChar, st.x, charY);
-                        }
+                            st.row += st.speed;
+                            const currentRow = Math.floor(st.row);
+                            const charY = currentRow * st.cellH;
 
-                        // When stream completely clears bottom, respawn at a brand-new random screen-space X
-                        if (charY > h + 40) {
-                            st.x = Math.random() * (w - 24); // Freeform X across viewport
-                            st.row = -Math.floor(Math.random() * 15);
-                            st.lastRow = -999;
-                            st.speed = 0.4 + Math.random() * 0.5;
+                            // Only generate and stamp when entering a fresh integer cell
+                            if (currentRow !== st.lastRow) {
+                                st.lastRow = currentRow;
+                                st.currentChar = chars[Math.floor(Math.random() * chars.length)];
+                            }
+
+                            // Draw character at active head position; past positions naturally echo & fade
+                            if (charY >= 0 && charY <= h + 24) {
+                                bgCtx.fillText(st.currentChar, st.x, charY);
+                            }
+
+                            // When stream completely clears bottom, respawn at a brand-new random screen-space X
+                            if (charY > h + 50) {
+                                st.x = Math.random() * (w - 24);
+                                st.row = -Math.floor(Math.random() * 15);
+                                st.lastRow = -999;
+                                const tierRoll = Math.random();
+                                st.tier = tierRoll < 0.45 ? 0 : (tierRoll < 0.80 ? 1 : 2);
+                                st.cellH = st.tier === 0 ? 14 : (st.tier === 1 ? 18 : 24);
+                                st.speed = st.tier === 0 ? (0.22 + Math.random() * 0.16) :
+                                           st.tier === 1 ? (0.42 + Math.random() * 0.22) :
+                                                           (0.70 + Math.random() * 0.35);
+                            }
                         }
                     }
                     break;
