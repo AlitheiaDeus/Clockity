@@ -9,6 +9,6 @@ The current starfield moves along linear Z steps, feeling like flat drifting dot
 - **Phosphor Accent Color**: Stars strictly adhere to `bgAccentColor` without rogue white dots.
 
 ## 3. Acceptance Criteria
-- [ ] Stars accelerate smoothly as they approach the viewport boundary.
-- [ ] Proximity motion blur streaks appear dynamically on close stars.
-- [ ] Zero CPU/GPU lag.
+- [x] Stars accelerate smoothly as they approach the viewport boundary.
+- [x] Proximity motion blur streaks appear dynamically on close stars.
+- [x] Zero CPU/GPU lag.

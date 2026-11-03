@@ -83,6 +83,13 @@
             display: block;
         }
 
+        /* CRT Curved Phosphor Bulb Distortion */
+        body.crt-anim-active #bg-canvas {
+            transform: scale(1.025);
+            border-radius: 28px;
+            box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.85);
+        }
+
         /* Screen Blanker / Panel De-Energizer Overlay */
         #blanker-overlay {
             position: fixed;
@@ -1699,6 +1706,7 @@
 
             document.body.classList.toggle('slashed-zero-on', state.slashedZero);
             document.body.classList.toggle('eco-governor', state.ecoMode);
+            document.body.classList.toggle('crt-anim-active', state.bgAnim === 'static');
             blankerOverlay.style.backgroundColor = state.blankColor;
 
             formatBtn.textContent = state.use24Hour ? 'Switch to 12h' : 'Switch to 24h';
@@ -2372,11 +2380,17 @@
 
             // Lazy Particle / Buffer Allocation
             if (state.bgAnim === 'stars') {
-                bgState.stars = Array.from({ length: 90 }, () => ({
-                    x: (Math.random() - 0.5) * w * 1.5,
-                    y: (Math.random() - 0.5) * h * 1.5,
-                    z: Math.random() * w
-                }));
+                // Relativistic Warp-Drive: Stars with continuous 3D coordinates & historical projection
+                bgState.stars = Array.from({ length: 95 }, () => {
+                    const z = Math.random() * w;
+                    const x = (Math.random() - 0.5) * w * 2.2;
+                    const y = (Math.random() - 0.5) * h * 2.2;
+                    const cx = w / 2;
+                    const cy = h / 2;
+                    const sx = cx + (x / z) * (w * 0.55);
+                    const sy = cy + (y / z) * (w * 0.55);
+                    return { x, y, z, prevSx: sx, prevSy: sy };
+                });
             } else if (state.bgAnim === 'matrix') {
                 // 3D Parallax Matrix: Streams distributed across Depth Tiers (0: Far, 1: Mid, 2: Near)
                 const streamCount = Math.floor(w / 22);
@@ -2420,10 +2434,10 @@
                     };
                 });
             } else if (state.bgAnim === 'water') {
-                // 3D Perspective Ripples: Elliptical foreshortening (eccentricity) based on horizon depth
-                bgState.ripples = Array.from({ length: 7 }, () => {
-                    const y = h * 0.35 + Math.random() * (h * 0.65);
-                    const depthRatio = (y - h * 0.35) / (h * 0.65); // 0 at horizon, 1 at viewport bottom
+                // 3D Perspective Ripples: Elliptical foreshortening spanning full screen height
+                bgState.ripples = Array.from({ length: 8 }, () => {
+                    const y = Math.random() * h;
+                    const depthRatio = Math.max(0.15, y / h); // Continuous depth from top (far) to bottom (near)
                     return {
                         x: Math.random() * w,
                         y,
@@ -2441,6 +2455,12 @@
                 bgState.staticCtx = sc.getContext('2d');
                 bgState.staticImgData = bgState.staticCtx.createImageData(240, 135);
                 bgState.staticBuf32 = new Uint32Array(bgState.staticImgData.data.buffer);
+                bgState.staticDx2 = new Float32Array(240);
+                const halfW = 120;
+                for (let x = 0; x < 240; x++) {
+                    const nx = (x - halfW) / halfW;
+                    bgState.staticDx2[x] = nx * nx;
+                }
             } else if (state.bgAnim === 'grid') {
                 bgState.gridOffset = 0;
             }
@@ -2551,28 +2571,61 @@
                 }
 
                 case 'stars': {
-                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.38);
+                    // Relativistic Warp-Drive Starfield: Hyperbolic acceleration + Proximity speed streaks
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.32);
                     bgCtx.fillRect(0, 0, w, h);
                     const cx = w / 2;
                     const cy = h / 2;
+
                     for (const s of bgState.stars) {
-                        s.z -= 4.2;
-                        if (s.z <= 1) {
+                        // Hyperbolic relativistic speed: accelerates as Z approaches 0
+                        const zRatio = s.z / w;
+                        const warpVelocity = 3.5 + Math.pow(1 - zRatio, 2.2) * 16.0;
+                        s.z -= warpVelocity;
+
+                        if (s.z <= 2) {
                             s.z = w;
-                            s.x = (Math.random() - 0.5) * w * 1.5;
-                            s.y = (Math.random() - 0.5) * h * 1.5;
+                            s.x = (Math.random() - 0.5) * w * 2.2;
+                            s.y = (Math.random() - 0.5) * h * 2.2;
+                            s.prevSx = cx + (s.x / s.z) * (w * 0.55);
+                            s.prevSy = cy + (s.y / s.z) * (w * 0.55);
+                            continue;
                         }
-                        const sx = cx + (s.x / s.z) * (w * 0.6);
-                        const sy = cy + (s.y / s.z) * (w * 0.6);
-                        const size = Math.max(0.7, (1 - s.z / w) * 3.2);
-                        const alpha = Math.max(0.35, 1 - s.z / w);
-                        
-                        // Starfield: Direct high-luminance accent rendering
-                        const starAlpha = (s.z < w * 0.35) ? 1.0 : Math.min(0.85, alpha);
-                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${starAlpha.toFixed(2)})`;
-                        bgCtx.beginPath();
-                        bgCtx.arc(sx, sy, size, 0, Math.PI * 2);
-                        bgCtx.fill();
+
+                        const sx = cx + (s.x / s.z) * (w * 0.55);
+                        const sy = cy + (s.y / s.z) * (w * 0.55);
+
+                        // If star projected off-screen, recycle immediately
+                        if (sx < -20 || sx > w + 20 || sy < -20 || sy > h + 20) {
+                            s.z = w;
+                            s.x = (Math.random() - 0.5) * w * 2.2;
+                            s.y = (Math.random() - 0.5) * h * 2.2;
+                            s.prevSx = cx + (s.x / s.z) * (w * 0.55);
+                            s.prevSy = cy + (s.y / s.z) * (w * 0.55);
+                            continue;
+                        }
+
+                        const depthAlpha = Math.min(1.0, Math.max(0.25, 1 - (s.z / w)));
+                        const size = Math.max(0.7, (1 - s.z / w) * 3.4);
+
+                        // Close stars draw genuine relativistic motion laser streaks
+                        if (s.z < w * 0.60 && s.prevSx !== undefined) {
+                            bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${depthAlpha.toFixed(2)})`;
+                            bgCtx.lineWidth = Math.min(2.5, size * 0.85);
+                            bgCtx.beginPath();
+                            bgCtx.moveTo(s.prevSx, s.prevSy);
+                            bgCtx.lineTo(sx, sy);
+                            bgCtx.stroke();
+                        } else {
+                            // Distant stars: Pinprick points
+                            bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${depthAlpha.toFixed(2)})`;
+                            bgCtx.beginPath();
+                            bgCtx.arc(sx, sy, size, 0, Math.PI * 2);
+                            bgCtx.fill();
+                        }
+
+                        s.prevSx = sx;
+                        s.prevSy = sy;
                     }
                     break;
                 }
@@ -2629,8 +2682,8 @@
                         if (rp.r >= rp.maxR) {
                             rp.r = 2;
                             rp.x = Math.random() * w;
-                            rp.y = h * 0.35 + Math.random() * (h * 0.65);
-                            rp.depthRatio = (rp.y - h * 0.35) / (h * 0.65);
+                            rp.y = Math.random() * h;
+                            rp.depthRatio = Math.max(0.15, rp.y / h);
                             rp.maxR = 90 + rp.depthRatio * 180;
                             rp.speed = 0.35 + rp.depthRatio * 0.85;
                         }
@@ -2680,28 +2733,35 @@
                     const scW = bgState.staticCanvas.width;
                     const scH = bgState.staticCanvas.height;
                     const buf = bgState.staticBuf32;
+                    const dx2 = bgState.staticDx2;
+                    const halfH = scH / 2;
                     const ar = bgAccentRgb.r, ag = bgAccentRgb.g, ab = bgAccentRgb.b;
                     const br = bgRgb.r, bgVal = bgRgb.g, bb = bgRgb.b;
 
-                    // Direct Co-Rasterization: Scanlines and RF Snow occupy the exact same TVL pixel space
+                    // Direct Co-Rasterization with Barrel Curvature:
+                    // Scanlines bow outward toward edges via spherical bulb formula
                     let idx = 0;
                     for (let y = 0; y < scH; y++) {
-                        const isScanline = (y % 2 === 1); // Alternating television raster lines
+                        const ny = (y - halfH) / halfH;
+                        const dyFactor = ny * 3.8;
                         for (let x = 0; x < scW; x++) {
+                            const curvedY = (y + (dx2 ? dx2[x] : 0) * dyFactor) | 0;
+                            const isScanline = (curvedY & 1) === 1; // Spherical warped scanline
                             const n = Math.random();
                             if (isScanline) {
                                 // TVL beam gap / shadow mask: dimmed phosphor floor
-                                const dim = n * 0.18;
+                                const dim = n * 0.10;
                                 const r = (br + (ar - br) * dim) | 0;
                                 const g = (bgVal + (ag - bgVal) * dim) | 0;
                                 const b = (bb + (ab - bb) * dim) | 0;
                                 buf[idx++] = (255 << 24) | (b << 16) | (g << 8) | r;
                             } else {
-                                // Active phosphor scanline: RF white/accent noise
-                                const intensity = n > 0.38 ? (n * 0.85) : (n * 0.25);
-                                const r = Math.min(255, (br + (ar - br) * intensity + (n > 0.86 ? 38 : 0))) | 0;
-                                const g = Math.min(255, (bgVal + (ag - bgVal) * intensity + (n > 0.86 ? 38 : 0))) | 0;
-                                const b = Math.min(255, (bb + (ab - bb) * intensity + (n > 0.86 ? 38 : 0))) | 0;
+                                // Active phosphor scanline: calibrated soft atmospheric floor
+                                const intensity = n > 0.40 ? (n * 0.42) : (n * 0.15);
+                                const spark = (n > 0.94 ? 18 : 0);
+                                const r = Math.min(255, (br + (ar - br) * intensity + spark)) | 0;
+                                const g = Math.min(255, (bgVal + (ag - bgVal) * intensity + spark)) | 0;
+                                const b = Math.min(255, (bb + (ab - bb) * intensity + spark)) | 0;
                                 buf[idx++] = (255 << 24) | (b << 16) | (g << 8) | r;
                             }
                         }
@@ -2713,9 +2773,10 @@
                     bgCtx.drawImage(bgState.staticCanvas, 0, 0, w, h);
 
                     // CRT Curved Phosphor Bulb Edge Vignette
-                    const vig = bgCtx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.36, w / 2, h / 2, Math.max(w, h) * 0.74);
+                    const vig = bgCtx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.72);
                     vig.addColorStop(0, 'rgba(0,0,0,0)');
-                    vig.addColorStop(1, 'rgba(0,0,0,0.65)');
+                    vig.addColorStop(0.7, 'rgba(0,0,0,0.32)');
+                    vig.addColorStop(1, 'rgba(0,0,0,0.80)');
                     bgCtx.fillStyle = vig;
                     bgCtx.fillRect(0, 0, w, h);
                     break;
@@ -2725,55 +2786,37 @@
                     bgCtx.fillStyle = hexToRgba(state.bgColor, 0.95);
                     bgCtx.fillRect(0, 0, w, h);
 
-                    const horizonY = h * 0.44;
+                    // Off-Screen Horizon: Vanishing point sits above the top of the viewport
+                    // Guarantees zero focal hotspot / zero burn-in risk across the visible screen
+                    const horizonY = -h * 0.28;
                     bgState.gridOffset = ((bgState.gridOffset || 0) + 0.65) % 40;
 
-                    // Anti-burn drift: gentle horizontal wander of the vanishing point over time
-                    const driftOffset = Math.sin(bgState.phase * 0.25) * 14;
+                    // Anti-burn drift: gentle horizontal wander of the off-screen vanishing point
+                    const driftOffset = Math.sin(bgState.phase * 0.22) * 24;
                     const cx = w / 2 + driftOffset;
 
-                    // Upper Sky Atmosphere: subtle retro twilight gradient to balance screen
-                    const skyGrad = bgCtx.createLinearGradient(0, 0, 0, horizonY);
-                    skyGrad.addColorStop(0, hexToRgba(state.bgColor, 0.9));
-                    skyGrad.addColorStop(0.7, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.08)`);
-                    skyGrad.addColorStop(1, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.22)`);
-                    bgCtx.fillStyle = skyGrad;
-                    bgCtx.fillRect(0, 0, w, horizonY);
+                    // Full-Height Perspective Floor (spans 100% of the visible viewport)
+                    const totalDepth = h - horizonY;
 
-                    // Diffuse Soft Horizon Glow (avoids high-luminance pinpoint hotspot at VP)
-                    const horizGrad = bgCtx.createLinearGradient(0, horizonY - 35, 0, horizonY + 30);
-                    horizGrad.addColorStop(0, 'rgba(0,0,0,0)');
-                    horizGrad.addColorStop(0.5, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.28)`);
-                    horizGrad.addColorStop(1, 'rgba(0,0,0,0)');
-                    bgCtx.fillStyle = horizGrad;
-                    bgCtx.fillRect(0, horizonY - 35, w, 65);
-
-                    bgCtx.save();
-                    bgCtx.beginPath();
-                    bgCtx.rect(0, horizonY, w, h - horizonY);
-                    bgCtx.clip();
-
-                    // Road Grid: Perspective lines with VP burn-in truncation
-                    const numLines = Math.floor(w / 38) + 12;
+                    // 1. Perspective fan lines radiating from the off-screen apex
+                    const numLines = Math.floor(w / 45) + 16;
                     for (let i = -numLines; i <= numLines; i++) {
-                        const bottomX = cx + i * 85;
-                        // Truncate start slightly below horizon to avoid stationary convergence hotspot
-                        const startY = horizonY + 8;
-                        const startX = cx + (bottomX - cx) * 0.04;
+                        const bottomX = cx + i * 95;
                         bgCtx.beginPath();
-                        bgCtx.moveTo(startX, startY);
-                        bgCtx.lineTo(bottomX, h);
-                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.24)`;
-                        bgCtx.lineWidth = 1.2;
+                        bgCtx.moveTo(cx, horizonY);
+                        bgCtx.lineTo(bottomX, h + 20);
+                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.22)`;
+                        bgCtx.lineWidth = 1.3;
                         bgCtx.stroke();
                     }
 
-                    // Forward-moving horizontal grid lines with perspective compression
-                    const floorH = h - horizonY;
-                    for (let y = bgState.gridOffset; y < floorH; y += 32) {
-                        const ratio = Math.pow(y / floorH, 1.85);
-                        const py = horizonY + ratio * floorH;
-                        const lineAlpha = Math.min(0.55, ratio * 0.68);
+                    // 2. Continuous forward-moving cross lines with smooth depth compression across entire screen
+                    for (let y = bgState.gridOffset; y < totalDepth; y += 32) {
+                        const ratio = Math.pow(y / totalDepth, 1.85);
+                        const py = horizonY + ratio * totalDepth;
+                        if (py < 0 || py > h) continue;
+
+                        const lineAlpha = Math.min(0.65, ratio * 0.72);
                         bgCtx.beginPath();
                         bgCtx.moveTo(0, py);
                         bgCtx.lineTo(w, py);
@@ -2782,20 +2825,12 @@
                         bgCtx.stroke();
                     }
 
-                    // Smooth lateral corner gradients between road edge and horizon
-                    const leftEdgeGrad = bgCtx.createLinearGradient(0, horizonY, w * 0.18, horizonY + floorH * 0.4);
-                    leftEdgeGrad.addColorStop(0, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.18)`);
-                    leftEdgeGrad.addColorStop(1, 'rgba(0,0,0,0)');
-                    bgCtx.fillStyle = leftEdgeGrad;
-                    bgCtx.fillRect(0, horizonY, w * 0.2, floorH);
-
-                    const rightEdgeGrad = bgCtx.createLinearGradient(w, horizonY, w * 0.82, horizonY + floorH * 0.4);
-                    rightEdgeGrad.addColorStop(0, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.18)`);
-                    rightEdgeGrad.addColorStop(1, 'rgba(0,0,0,0)');
-                    bgCtx.fillStyle = rightEdgeGrad;
-                    bgCtx.fillRect(w * 0.8, horizonY, w * 0.2, floorH);
-
-                    bgCtx.restore();
+                    // 3. Subtle ambient horizon glow fanning downward from top boundary
+                    const topGlow = bgCtx.createLinearGradient(0, 0, 0, h * 0.35);
+                    topGlow.addColorStop(0, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.18)`);
+                    topGlow.addColorStop(1, 'rgba(0,0,0,0)');
+                    bgCtx.fillStyle = topGlow;
+                    bgCtx.fillRect(0, 0, w, h * 0.35);
                     break;
                 }
             }

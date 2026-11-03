@@ -11,5 +11,5 @@ When a perspective horizon / vanishing point sits inside the visible screen (`ho
 - **Deep Water**: Ripples span the entire viewport with continuous perspective elliptical foreshortening based on full screen height.
 
 ## 3. Acceptance Criteria
-- [ ] No focal line convergence hotspot exists inside the visible viewport.
-- [ ] Grid and ripples cover full screen height smoothly and safely.
+- [x] No focal line convergence hotspot exists inside the visible viewport.
+- [x] Grid and ripples cover full screen height smoothly and safely.

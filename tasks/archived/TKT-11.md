@@ -10,5 +10,5 @@ The CRT Static background animation features 240p co-rasterized scanlines and ed
    - Cap the maximum snow luminance factor so `bgAccent` noise remains an atmospheric ambient backdrop rather than competing with foreground digital clock legibility.
 
 ## 3. Acceptance Criteria
-- [ ] Subtle curved bulb distortion visible along CRT raster edges.
-- [ ] Foreground digits maintain sharp contrast over the calibrated static floor.
+- [x] Subtle curved bulb distortion visible along CRT raster edges.
+- [x] Foreground digits maintain sharp contrast over the calibrated static floor.
