@@ -8,7 +8,7 @@ kanban
     tkt07["Matrix True Random Screen Space Drops"]@{ ticket: '[TKT-07]', priority: 'High' }
     tkt08["Live FPS Tracker & HUD Toggle"]@{ ticket: '[TKT-08]', priority: 'Medium' }
   reported["Reported (Backlog Candidates)"]
-    pln01["New Ambient Screensavers (Pixel Rain, Lasers, Tetriminos)"]@{ ticket: '[PLN-01]', priority: 'Low' }
+    pln01["New Ambient Screensavers (C-Matrix, Pixel Rain, Lasers, Tetriminos)"]@{ ticket: '[PLN-01]', priority: 'Low' }
   in_progress["In Progress (WIP = 1)"]
   completed["Completed (Fresh / Review)"]
     bug01["Matrix Fade Infinite Ghost Trails"]@{ ticket: '[BUG-01]', priority: 'High' }
