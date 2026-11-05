@@ -2,6 +2,10 @@
 
 > **Ultra on-demand, zero-idle ambient digital clock with minute-boundary sleep, CRT rasterizer, Eco Governor, and decoupled procedural shaders in pure vanilla HTML5/CSS3/JS.**
 
+<p align="center">
+  <img src="docs/images/clockity_matrix_preview.jpg" alt="Clockity Matrix Rain Ambient Display" width="100%" />
+</p>
+
 ---
 
 ## Highlights
