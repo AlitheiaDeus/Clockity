@@ -78,8 +78,8 @@ Use this checklist whenever you add features, tweak styles, or modify the schedu
   - Inspect `#bg-canvas` in DevTools: width and height must be `0px` and `display: none` (consuming **0 bytes of GPU RAM**).
 - [ ] **Procedural Backgrounds**:
   - Test each background: `Time of Day`, `Aurora Silk`, `Starfield`, `Matrix Rain`, `Ember Fire`, `Deep Water`, `CRT Static`, `Cyber Grid`.
-  - **Cyber Grid Perspective Horizon**: Renders an infinite 3D perspective synthwave grid scrolling smoothly toward the horizon, rendered purely in `bgAccentColor` and `bgColor` at battery-friendly ~20 FPS.
-  - **CRT Static Authentic Co-Rasterization**: Renders an authentic retro cathode-ray tube raster in 240p (240x135) offscreen buffer. Horizontal TVL scanline gaps and RF phosphor static noise are co-rasterized on the exact same pixel grid, framed by a curved phosphor bulb vignette. Uses pure `bgAccentColor` and `bgColor`.
+  - **Cyber Grid Hybrid Synthwave Breather**: Renders an infinite 3D perspective synthwave grid scrolling smoothly forward with undulating rolling elevation waves across the crossbars and lateral sinusoidal breathing on the perspective fan ribs. Completely zero hotspot and zero garbage generation.
+  - **CRT Static Authentic Co-Rasterization & Scanline Interlacing**: Renders an authentic retro cathode-ray tube raster in 240p (240x135) offscreen buffer with flexed quadratic barrel distortion ($5.2$). Slices fine horizontal raster beam gaps through the foreground clock digits via dedicated `#crt-scanlines` overlay while keeping phosphor static snow strictly in the background. Framed by a 44px rounded tube perimeter and deep radial vignette.
   - **Starfield Pure Ambient Shimmer**: Shimmers entirely in variations and opacities of `bgAccentColor` against `bgColor` (no rogue white stars).
   - **Matrix Rain Palette Decoupling**: Rain drops and fading characters strictly adhere to `bgAccentColor` and `bgColor`, completely decoupled from the foreground `clockColor`.
   - Canvas renders at a cool, battery-friendly ~20 FPS.
@@ -149,3 +149,18 @@ Use this checklist whenever you add features, tweak styles, or modify the schedu
   - Change mode, theme, font, and zoom level.
   - Refresh the browser (`Ctrl+R` / `F5`).
   - All selected preferences must persist seamlessly from `localStorage`.
+
+---
+
+## 9. Dynamic Favicon & Master Engine Guard
+- [ ] **Zero-Idle Dynamic Favicon**:
+  - Tab bar displays a glowing circular neon analog clock face matching the active theme color (`state.clockColor`).
+  - Updates strictly once per minute at the minute boundary (`0.00%` CPU between updates).
+  - Toggling theme immediately tints the favicon ring and hands to the new color.
+- [ ] **Hardware Acceleration Probe**:
+  - Tests WebGL renderer string on boot.
+  - If software rasterization is detected, emits a non-blocking toast warning.
+- [ ] **Direct Scanout & Zero-Copy Compositing**:
+  - Full-screen `filter: brightness` is bypassed at 100% brightness (`body.dimmed` inactive), allowing hardware overlays (MPO) and smooth multi-monitor video playback without frame drops.
+- [ ] **Unified Master RAF Heartbeat**:
+  - High-frequency clock and procedural backgrounds are coordinated in a single RAF loop (`state.masterRafId`), preventing dual-loop GPU queue contention.

@@ -8,6 +8,8 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" id="meta-theme-color" content="#000000">
     <title>Clockity 4 — On-Demand Ambient Clock</title>
+    <!-- Dynamic Zero-Idle Theme Favicon -->
+    <link rel="icon" id="dynamic-favicon" type="image/png">
     <!-- Google Fonts: Orbitron, Inter, JetBrains Mono, Share Tech Mono, Cinzel, Silkscreen -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -74,20 +76,55 @@
             height: 100%;
             z-index: 1;
             pointer-events: none;
-            filter: brightness(var(--brightness));
             display: none;
             transition: opacity 0.4s ease;
+            contain: strict;
         }
 
         #bg-canvas.active {
             display: block;
         }
 
+        /* Active brightness dimming pass: only applied when brightness is dimmed (< 1.0) */
+        body.dimmed #bg-canvas,
+        body.dimmed #clock-wrapper {
+            filter: brightness(var(--brightness));
+        }
+
         /* CRT Curved Phosphor Bulb Distortion */
         body.crt-anim-active #bg-canvas {
             transform: scale(1.025);
-            border-radius: 28px;
-            box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.85);
+            border-radius: 44px;
+            box-shadow: inset 0 0 140px rgba(0, 0, 0, 0.90);
+        }
+
+        body.crt-anim-active #clock-wrapper {
+            border-radius: 44px;
+            box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.82);
+        }
+
+        /* CRT Interlaced Beam Scanline Overlay (z=15: cuts across digits without static noise) */
+        #crt-scanlines {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 15;
+            pointer-events: none;
+            display: none;
+            background: repeating-linear-gradient(
+                to bottom,
+                rgba(0, 0, 0, 0) 0px,
+                rgba(0, 0, 0, 0) 2px,
+                rgba(0, 0, 0, 0.28) 2px,
+                rgba(0, 0, 0, 0.28) 4px
+            );
+            border-radius: 44px;
+            box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.85);
+        }
+
+        body.crt-anim-active #crt-scanlines {
+            display: block;
         }
 
         /* Screen Blanker / Panel De-Energizer Overlay */
@@ -146,7 +183,6 @@
             justify-content: center;
             padding: 1rem;
             transform: translate3d(var(--drift-x), var(--drift-y), 0) scale(var(--zoom-scale));
-            filter: brightness(var(--brightness));
             transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), filter 0.3s ease;
             transform-origin: center center;
             will-change: transform;
@@ -171,6 +207,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            contain: layout paint;
         }
 
         .clock-digits.with-seconds {
@@ -957,6 +994,9 @@
     <!-- 100% Lazy Procedural Canvas: 0x0 bytes RAM until animated effect is toggled -->
     <canvas id="bg-canvas"></canvas>
 
+    <!-- CRT Interlaced Beam Scanline Overlay (Hardware-separated raster) -->
+    <div id="crt-scanlines" aria-hidden="true"></div>
+
     <!-- Screen Blanker / Panel De-Energizer Overlay -->
     <div id="blanker-overlay" title="Click or press any key to wake display">
         <div id="blanker-hint">
@@ -1493,17 +1533,24 @@
 
             // Internal scheduler IDs
             tickTimeoutId: null,
-            highFreqRafId: null,
-            bgRafId: null,
+            masterRafId: null,
             driftIntervalId: null,
             idleTimer: null,
             autoBlankTimer: null,
             toastTimer: null,
             wakeLockSentinel: null,
-            lastFormattedDate: ''
+            lastFormattedDate: '',
+
+            // Engine & Favicon state
+            hardwareAccelerated: true,
+            favCanvas: null,
+            favCtx: null,
+            lastFaviconMin: -1
         };
 
         // Cache DOM Elements
+        const dynamicFavicon = document.getElementById('dynamic-favicon');
+        const crtScanlines = document.getElementById('crt-scanlines');
         const slotH1 = document.getElementById('slot-h1');
         const slotH2 = document.getElementById('slot-h2');
         const slotM1 = document.getElementById('slot-m1');
@@ -1645,10 +1692,7 @@
                     state.clockMode = 'digital';
                 }
 
-                if (state.bgRafId) {
-                    cancelAnimationFrame(state.bgRafId);
-                    state.bgRafId = null;
-                }
+                stopAllSchedulers();
                 initBgCanvas();
 
                 if (notify) showToast('Eco Mode: Animations & Sub-seconds Halted (0.016 Hz Sleep)');
@@ -1703,6 +1747,7 @@
 
             const bLevel = state.brightnessLevels[state.brightnessIndex] || 1;
             root.style.setProperty('--brightness', bLevel);
+            document.body.classList.toggle('dimmed', bLevel < 1);
 
             document.body.classList.toggle('slashed-zero-on', state.slashedZero);
             document.body.classList.toggle('eco-governor', state.ecoMode);
@@ -1720,6 +1765,8 @@
             document.getElementById('custom-date-color').value = state.dateColor;
             document.getElementById('custom-bg-color').value = state.bgColor;
             document.getElementById('custom-bg-accent-color').value = state.bgAccentColor;
+
+            updateFavicon();
         }
 
         /**
@@ -1799,6 +1846,12 @@
             const m = now.getMinutes();
             const s = now.getSeconds();
             const ms = now.getMilliseconds();
+
+            // Zero-idle dynamic favicon sync (ticks once per minute)
+            if (state.lastFaviconMin !== m) {
+                state.lastFaviconMin = m;
+                updateFavicon(now);
+            }
 
             // 1. Digital Mode
             if (state.clockMode === 'digital') {
@@ -1897,15 +1950,153 @@
             }
         }
 
+        /**
+         * HARDWARE ACCELERATION PROBE
+         * Tests WebGL renderer string for software fallbacks (SwiftShader, llvmpipe, etc.)
+         * Displays a one-time non-blocking notification if GPU acceleration is missing.
+         */
+        function probeHardwareAcceleration() {
+            try {
+                const probeCanvas = document.createElement('canvas');
+                const gl = probeCanvas.getContext('webgl') || probeCanvas.getContext('experimental-webgl');
+                if (!gl) {
+                    state.hardwareAccelerated = false;
+                    showToast('⚠️ Software rendering detected (No GPU acceleration)');
+                    return;
+                }
+                const ext = gl.getExtension('WEBGL_debug_renderer_info');
+                const renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+                const isSoftware = /swiftshader|llvmpipe|software|microsoft basic render/i.test(renderer);
+                if (isSoftware) {
+                    state.hardwareAccelerated = false;
+                    showToast('⚠️ Software rendering detected (No GPU acceleration)');
+                } else {
+                    state.hardwareAccelerated = true;
+                }
+            } catch (e) {
+                state.hardwareAccelerated = true;
+            }
+        }
+
+        /**
+         * DYNAMIC ZERO-IDLE THEME-MATCHING FAVICON
+         * Generates a 32x32 tickless analog clock face matching state.clockColor.
+         * Only triggers on minute boundaries and theme changes (0.00% CPU in sleep).
+         */
+        function updateFavicon(now = new Date()) {
+            if (!dynamicFavicon) return;
+            if (!state.favCanvas) {
+                state.favCanvas = document.createElement('canvas');
+                state.favCanvas.width = 32;
+                state.favCanvas.height = 32;
+                state.favCtx = state.favCanvas.getContext('2d');
+            }
+            const ctx = state.favCtx;
+            const cx = 16, cy = 16;
+            const radius = 13;
+
+            ctx.clearRect(0, 0, 32, 32);
+
+            // Dark circular bezel
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.fillStyle = '#08080c';
+            ctx.fill();
+
+            // Glowing outer rim in active theme clock color
+            ctx.strokeStyle = state.clockColor;
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+
+            // Hands: current hour & minute (tickless analog)
+            const hours = now.getHours() % 12;
+            const minutes = now.getMinutes();
+            const hrAngle = ((hours + minutes / 60) / 12) * Math.PI * 2 - Math.PI / 2;
+            const minAngle = (minutes / 60) * Math.PI * 2 - Math.PI / 2;
+
+            // Hour hand (clean tickless 6.5px)
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + Math.cos(hrAngle) * 6.5, cy + Math.sin(hrAngle) * 6.5);
+            ctx.lineWidth = 2.0;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = state.clockColor;
+            ctx.stroke();
+
+            // Minute hand (clean tickless 10px)
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + Math.cos(minAngle) * 10, cy + Math.sin(minAngle) * 10);
+            ctx.lineWidth = 1.5;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = state.clockColor;
+            ctx.stroke();
+
+            // Pinion center dot
+            ctx.beginPath();
+            ctx.arc(cx, cy, 1.2, 0, Math.PI * 2);
+            ctx.fillStyle = state.clockColor;
+            ctx.fill();
+
+            dynamicFavicon.href = state.favCanvas.toDataURL('image/png');
+        }
+
         function stopAllSchedulers() {
             if (state.tickTimeoutId) {
                 clearTimeout(state.tickTimeoutId);
                 state.tickTimeoutId = null;
             }
-            if (state.highFreqRafId) {
-                cancelAnimationFrame(state.highFreqRafId);
-                state.highFreqRafId = null;
+            if (state.masterRafId) {
+                cancelAnimationFrame(state.masterRafId);
+                state.masterRafId = null;
             }
+        }
+
+        let lastClockTick = 0;
+        let lastBgFrame = 0;
+        let masterFrames = 0;
+        let masterLastSample = performance.now();
+
+        function masterHeartbeat(ts) {
+            if (document.visibilityState === 'hidden' || state.isBlanked || state.ecoMode) {
+                state.masterRafId = null;
+                scheduleNextClockTick();
+                return;
+            }
+
+            const needsClockRaf = state.showMs || state.clockMode === 'sand' || 
+                                 (state.clockMode === 'progress' && (state.showSeconds || state.showMs));
+            const needsBgRaf = (state.bgAnim !== 'none');
+
+            if (!needsClockRaf && !needsBgRaf) {
+                state.masterRafId = null;
+                scheduleNextClockTick();
+                return;
+            }
+
+            // 1. Clock high-frequency tick (~30 FPS target: 32ms)
+            if (needsClockRaf && (ts - lastClockTick >= 32)) {
+                updateClock();
+                lastClockTick = ts;
+            }
+
+            // 2. Procedural canvas background render (~15 FPS target: 66ms)
+            if (needsBgRaf && (ts - lastBgFrame >= 66)) {
+                renderBgFrame();
+                lastBgFrame = ts;
+            }
+
+            // Framerate metering
+            masterFrames++;
+            const now = performance.now();
+            if (now - masterLastSample >= 1000) {
+                state.measuredFps = Math.round((masterFrames * 1000) / (now - masterLastSample));
+                masterFrames = 0;
+                masterLastSample = now;
+                updateHudRateLabel();
+            }
+
+            state.masterRafId = requestAnimationFrame(masterHeartbeat);
         }
 
         function scheduleNextClockTick() {
@@ -1918,42 +2109,30 @@
                 return;
             }
 
-            const needsRaf = state.showMs || state.clockMode === 'sand' || 
-                             (state.clockMode === 'progress' && (state.showSeconds || state.showMs));
+            const needsClockRaf = (state.showMs || state.clockMode === 'sand' || 
+                                  (state.clockMode === 'progress' && (state.showSeconds || state.showMs))) && !state.ecoMode;
+            const needsBgRaf = (state.bgAnim !== 'none') && !state.ecoMode;
 
-            if (needsRaf && !state.ecoMode) {
-                // Adaptive High-Freq Loop (~30 FPS, smooth & GPU-efficient)
-                updateHudRateLabel('High Precision • 30 Hz');
-                let lastTick = 0;
-                let hfFrames = 0;
-                let hfLastSample = performance.now();
-                function step(ts) {
-                    if (document.visibilityState === 'hidden' || state.isBlanked) return;
-                    if (ts - lastTick >= 32) {
-                        updateClock();
-                        lastTick = ts;
-                        hfFrames++;
-                        const now = performance.now();
-                        if (now - hfLastSample >= 1000) {
-                            state.measuredFps = Math.round((hfFrames * 1000) / (now - hfLastSample));
-                            hfFrames = 0;
-                            hfLastSample = now;
-                            updateHudRateLabel();
-                        }
-                    }
-                    state.highFreqRafId = requestAnimationFrame(step);
+            if (needsClockRaf || needsBgRaf) {
+                const label = needsClockRaf ? 'High Precision • 30 Hz' : 'Active Visuals • 15 Hz';
+                updateHudRateLabel(label);
+                if (!state.masterRafId) {
+                    lastClockTick = 0;
+                    lastBgFrame = 0;
+                    masterFrames = 0;
+                    masterLastSample = performance.now();
+                    state.masterRafId = requestAnimationFrame(masterHeartbeat);
                 }
-                state.highFreqRafId = requestAnimationFrame(step);
                 return;
             }
 
-            const needsSecondTick = state.showSeconds || state.blinkColon || 
-                                    state.clockMode === 'analog12' || state.clockMode === 'analog24' || 
-                                    state.clockMode === 'progress';
+            const needsSecondTick = (state.showSeconds || state.blinkColon || 
+                                     state.clockMode === 'analog12' || state.clockMode === 'analog24' || 
+                                     state.clockMode === 'progress') && !state.ecoMode;
 
-            if (needsSecondTick && !state.ecoMode) {
+            if (needsSecondTick) {
                 // Second-Aligned Precision Tick (1.0 Hz)
-                state.measuredFps = (state.bgAnim !== 'none') ? state.measuredFps : 1;
+                state.measuredFps = 1;
                 updateHudRateLabel('Active • 1.0 Hz');
                 updateClock();
                 const now = new Date();
@@ -1967,7 +2146,7 @@
             // ZERO-IDLE MINUTE-SYNCED MODE:
             // Calculate exact milliseconds until the :00 second mark of the upcoming minute!
             // CPU enters deep sleep C-states. 0.00% CPU usage between minutes.
-            state.measuredFps = (state.bgAnim !== 'none') ? state.measuredFps : 0;
+            state.measuredFps = 0;
             updateClock();
             const now = new Date();
             const msToNextMin = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
@@ -2467,41 +2646,8 @@
         }
 
         function startBgLoop() {
-            if (state.bgRafId) {
-                cancelAnimationFrame(state.bgRafId);
-                state.bgRafId = null;
-            }
-
             initBgCanvas();
-
-            if (state.bgAnim === 'none' || state.isBlanked || state.ecoMode || document.visibilityState === 'hidden') {
-                return;
-            }
-
-            let lastFrame = 0;
-            let fpsFrames = 0;
-            let fpsLastSample = performance.now();
-            const interval = 66; // ~15 FPS keeps side-panel GPU overhead imperceptible
-
-            function render(ts) {
-                if (state.bgAnim === 'none' || state.isBlanked || state.ecoMode || document.visibilityState === 'hidden') {
-                    return;
-                }
-                if (ts - lastFrame >= interval) {
-                    renderBgFrame();
-                    lastFrame = ts;
-                    fpsFrames++;
-                    const now = performance.now();
-                    if (now - fpsLastSample >= 1000) {
-                        state.measuredFps = Math.round((fpsFrames * 1000) / (now - fpsLastSample));
-                        fpsFrames = 0;
-                        fpsLastSample = now;
-                        updateHudRateLabel();
-                    }
-                }
-                state.bgRafId = requestAnimationFrame(render);
-            }
-            state.bgRafId = requestAnimationFrame(render);
+            scheduleNextClockTick();
         }
 
         function renderBgFrame() {
@@ -2743,7 +2889,7 @@
                     let idx = 0;
                     for (let y = 0; y < scH; y++) {
                         const ny = (y - halfH) / halfH;
-                        const dyFactor = ny * 3.8;
+                        const dyFactor = ny * 5.2;
                         for (let x = 0; x < scW; x++) {
                             const curvedY = (y + (dx2 ? dx2[x] : 0) * dyFactor) | 0;
                             const isScanline = (curvedY & 1) === 1; // Spherical warped scanline
@@ -2798,30 +2944,43 @@
                     // Full-Height Perspective Floor (spans 100% of the visible viewport)
                     const totalDepth = h - horizonY;
 
-                    // 1. Perspective fan lines radiating from the off-screen apex
+                    // 1. Perspective fan lines with lateral harmonic breathing
                     const numLines = Math.floor(w / 45) + 16;
                     for (let i = -numLines; i <= numLines; i++) {
                         const bottomX = cx + i * 95;
+                        const flexOffset = Math.sin(bgState.phase * 0.85 + i * 0.38) * 16;
                         bgCtx.beginPath();
                         bgCtx.moveTo(cx, horizonY);
-                        bgCtx.lineTo(bottomX, h + 20);
+                        bgCtx.quadraticCurveTo(
+                            cx + (bottomX - cx) * 0.45 + flexOffset,
+                            horizonY + totalDepth * 0.55,
+                            bottomX,
+                            h + 20
+                        );
                         bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.22)`;
                         bgCtx.lineWidth = 1.3;
                         bgCtx.stroke();
                     }
 
-                    // 2. Continuous forward-moving cross lines with smooth depth compression across entire screen
+                    // 2. Rolling undulating crossbars with traveling elevation waves
+                    const xSegments = 16;
+                    const stepX = w / xSegments;
                     for (let y = bgState.gridOffset; y < totalDepth; y += 32) {
                         const ratio = Math.pow(y / totalDepth, 1.85);
-                        const py = horizonY + ratio * totalDepth;
-                        if (py < 0 || py > h) continue;
+                        const basePy = horizonY + ratio * totalDepth;
+                        if (basePy < -15 || basePy > h + 25) continue;
 
-                        const lineAlpha = Math.min(0.65, ratio * 0.72);
+                        const lineAlpha = Math.min(0.68, ratio * 0.74);
                         bgCtx.beginPath();
-                        bgCtx.moveTo(0, py);
-                        bgCtx.lineTo(w, py);
+                        for (let seg = 0; seg <= xSegments; seg++) {
+                            const px = seg * stepX;
+                            const waveY = Math.sin(bgState.phase * 1.35 + (px / w) * 4.5 + ratio * 8.0) * (ratio * 12);
+                            const py = basePy + waveY;
+                            if (seg === 0) bgCtx.moveTo(px, py);
+                            else bgCtx.lineTo(px, py);
+                        }
                         bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${lineAlpha.toFixed(2)})`;
-                        bgCtx.lineWidth = 1.2;
+                        bgCtx.lineWidth = 1.25;
                         bgCtx.stroke();
                     }
 
@@ -2878,7 +3037,6 @@
             if (active) {
                 blankerOverlay.style.backgroundColor = state.blankColor;
                 stopAllSchedulers();
-                if (state.bgRafId) cancelAnimationFrame(state.bgRafId);
                 showToast('Display Sleeping • Click/Key to Wake');
             } else {
                 scheduleNextClockTick();
@@ -2938,10 +3096,6 @@
                 startBgLoop();
             } else {
                 stopAllSchedulers();
-                if (state.bgRafId) {
-                    cancelAnimationFrame(state.bgRafId);
-                    state.bgRafId = null;
-                }
             }
         });
 
@@ -3610,14 +3764,16 @@
          */
         function initApp() {
             loadPreferences();
+            probeHardwareAcceleration();
             applyVisuals();
             syncDrawerUI();
             applyClockMode();
             setupAntiBurnDrift();
             startBgLoop();
+            updateFavicon();
             requestWakeLock();
             resetIdleTimer();
-            showToast('Clockity 3 • On-Demand Ready');
+            showToast('Clockity 4 • On-Demand Ready');
         }
 
         if (document.readyState === 'loading') {

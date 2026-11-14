@@ -1,6 +1,7 @@
 # Agent Steering & Local Overrides
 AGENTS.md
 GEMINI.md
+.agents/
 
 # Task Tracking Archives (When Kept Local)
 kanban_archive.md
