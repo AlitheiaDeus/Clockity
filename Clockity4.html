@@ -10,10 +10,10 @@
     <title>Clockity 4 — On-Demand Ambient Clock</title>
     <!-- Dynamic Zero-Idle Theme Favicon -->
     <link rel="icon" id="dynamic-favicon" type="image/png">
-    <!-- Google Fonts: Orbitron, Inter, JetBrains Mono, Share Tech Mono, Cinzel, Silkscreen -->
+    <!-- Google Fonts: Orbitron, Inter, JetBrains Mono, Share Tech Mono, Cinzel, Silkscreen, Nixie One -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700;800&family=Nixie+One&family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
     
     <style>
         /* ============================================================================
@@ -91,19 +91,12 @@
             filter: brightness(var(--brightness));
         }
 
-        /* CRT Curved Phosphor Bulb Distortion */
+        /* CRT Curved Phosphor Bulb Distortion (handled optically in 240p raster) */
         body.crt-anim-active #bg-canvas {
-            transform: scale(1.025);
-            border-radius: 44px;
-            box-shadow: inset 0 0 140px rgba(0, 0, 0, 0.90);
+            transform: scale(1.015);
         }
 
-        body.crt-anim-active #clock-wrapper {
-            border-radius: 44px;
-            box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.82);
-        }
-
-        /* CRT Interlaced Beam Scanline Overlay (z=15: cuts across digits without static noise) */
+        /* CRT Interlaced Beam Scanline Overlay (disabled: scanlines co-rasterized in 240p buffer) */
         #crt-scanlines {
             position: fixed;
             inset: 0;
@@ -112,19 +105,10 @@
             z-index: 15;
             pointer-events: none;
             display: none;
-            background: repeating-linear-gradient(
-                to bottom,
-                rgba(0, 0, 0, 0) 0px,
-                rgba(0, 0, 0, 0) 2px,
-                rgba(0, 0, 0, 0.28) 2px,
-                rgba(0, 0, 0, 0.28) 4px
-            );
-            border-radius: 44px;
-            box-shadow: inset 0 0 120px rgba(0, 0, 0, 0.85);
         }
 
         body.crt-anim-active #crt-scanlines {
-            display: block;
+            display: none;
         }
 
         /* Screen Blanker / Panel De-Energizer Overlay */
@@ -207,7 +191,7 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            contain: layout paint;
+            contain: layout;
         }
 
         .clock-digits.with-seconds {
@@ -232,6 +216,47 @@
             font-feature-settings: "tnum" 1;
             flex-shrink: 0;
             margin: 0 0.025em; /* Guarantees adjacent wide digits (e.g. Orbitron '22', Silkscreen '22') never touch or meld */
+        }
+
+        /* Optional Nixie-style filament micro-flicker (pauses in Eco mode) */
+        @keyframes nixie-flicker {
+            0%, 100% { opacity: 1; }
+            48% { opacity: 0.96; }
+            50% { opacity: 0.90; }
+            52% { opacity: 0.98; }
+            80% { opacity: 0.94; }
+            82% { opacity: 1; }
+        }
+
+        body.filament-flicker .digit-slot {
+            animation: nixie-flicker 2.4s infinite steps(1, end);
+        }
+
+        body.filament-flicker.eco-governor .digit-slot {
+            animation: none;
+        }
+
+        /* 7-Segment Inline SVG LED Renderer */
+        .seg7-svg {
+            width: 92%;
+            height: 0.92em;
+            display: block;
+            overflow: visible;
+        }
+
+        .seg7-seg {
+            fill: var(--clock-color);
+            transition: opacity 0.06s linear;
+        }
+
+        .seg7-on {
+            opacity: 1;
+            filter: drop-shadow(0 0 8px var(--glow-primary));
+        }
+
+        .seg7-off {
+            opacity: 0.08;
+            filter: none;
         }
 
         /* Native Font Slashed Zeros (Natural OpenType font feature, zero ugly manual overlays) */
@@ -678,6 +703,68 @@
             background: rgba(255, 255, 255, 0.1);
         }
 
+        /* PLN-02: Modular Settings Studio Tabs */
+        .drawer-tabs {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 4px;
+            margin-bottom: 0.9rem;
+            padding: 3px;
+            background: rgba(255, 255, 255, 0.035);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+        }
+
+        .drawer-tab-btn {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 6px 4px;
+            border: none;
+            border-radius: 7px;
+            background: transparent;
+            color: #a1a1aa;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+        }
+
+        .drawer-tab-btn:hover {
+            color: #ffffff;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .drawer-tab-btn.active {
+            background: rgba(255, 255, 255, 0.13);
+            color: #ffffff;
+            box-shadow: inset 0 -2px 0 var(--clock-color);
+        }
+
+        .drawer-pane {
+            display: none;
+        }
+
+        .drawer-pane.active {
+            display: block;
+        }
+
+        .studio-slider-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 9px;
+            padding: 7px 10px;
+            margin-bottom: 0.5rem;
+        }
+
+        .studio-slider-row input[type="range"] {
+            flex: 1;
+            accent-color: var(--clock-color);
+            cursor: pointer;
+        }
+
         .section-label {
             display: block;
             font-size: 11px;
@@ -727,6 +814,26 @@
             background: rgba(255, 255, 255, 0.13);
             color: #ffffff;
             box-shadow: 0 0 12px var(--glow-secondary);
+        }
+
+        /* TKT-12: HUD High-Rate vs. Zero-Idle Distinction */
+        .opt-pill.zero-idle::after,
+        .opt-pill.high-rate::after {
+            content: '';
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .opt-pill.zero-idle::after {
+            background: #2bd999;
+            box-shadow: 0 0 5px rgba(43, 217, 153, 0.65);
+        }
+
+        .opt-pill.high-rate::after {
+            background: #f59e0b;
+            box-shadow: 0 0 5px rgba(245, 158, 11, 0.65);
         }
 
         .swatch-dot {
@@ -1182,67 +1289,71 @@
             </button>
         </div>
 
-        <!-- Clock Mode -->
-        <label class="section-label">Clock Mode</label>
-        <div class="pill-grid grid-3" id="clock-mode-group">
-            <button data-mode="digital" class="opt-pill selected">Digital</button>
-            <button data-mode="analog12" class="opt-pill">12h Analog</button>
-            <button data-mode="analog24" class="opt-pill">24h Analog</button>
-            <button data-mode="progress" class="opt-pill">Progress</button>
-            <button data-mode="sand" class="opt-pill">Sand Timer</button>
-            <button data-mode="binary" class="opt-pill">Binary BCD</button>
+        <!-- PLN-02: Modular Settings Studio Tabs -->
+        <div class="drawer-tabs" id="drawer-tabs">
+            <button class="drawer-tab-btn active" data-tab="horology">Horology</button>
+            <button class="drawer-tab-btn" data-tab="visuals">Visuals</button>
+            <button class="drawer-tab-btn" data-tab="studio">Studio</button>
+            <button class="drawer-tab-btn" data-tab="power">Power</button>
         </div>
 
-        <!-- Time & Precision -->
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
-            <label class="section-label" style="margin-bottom: 0;">Time & Precision</label>
-            <span style="font-size: 10px; color: #71717a;">High-rate elements halt in Eco</span>
-        </div>
-        <div class="pill-grid grid-3">
-            <button id="opt-24h" class="opt-pill selected">24-Hour</button>
-            <button id="opt-seconds" class="opt-pill">Seconds (:SS)</button>
-            <button id="opt-ms" class="opt-pill">Millisec (.ms)</button>
-        </div>
-        <div class="pill-grid grid-3">
-            <button id="opt-blink" class="opt-pill">Blink Colon</button>
-            <button id="opt-slash-zero" class="opt-pill selected">Slashed Zero</button>
-            <button id="opt-text-glow" class="opt-pill selected" title="Toggle neon text bloom filter">Text Glow</button>
-        </div>
-        <div class="pill-grid grid-3" style="margin-top: 0.35rem;">
-            <button id="opt-drift" class="opt-pill" title="Subtle pixel shift every 30s to prevent OLED/LCD retention">Anti-Burn Drift</button>
-            <button id="opt-fps" class="opt-pill" title="Real-time measured frame rate monitor">Live FPS</button>
-            <button id="opt-eco-governor" class="opt-pill" title="Suppress all high-speed animations, milliseconds, and seconds to enforce 0.016 Hz deep sleep">
-                <span class="swatch-dot" style="background: #2bd999;"></span>Eco
-            </button>
+        <!-- TAB 1: HOROLOGY -->
+        <div class="drawer-pane active" data-tab-panel="horology">
+            <!-- Clock Mode -->
+            <label class="section-label">Clock Mode</label>
+            <div class="pill-grid grid-3" id="clock-mode-group">
+                <button data-mode="digital" class="opt-pill selected">Digital</button>
+                <button data-mode="analog12" class="opt-pill">12h Analog</button>
+                <button data-mode="analog24" class="opt-pill">24h Analog</button>
+                <button data-mode="progress" class="opt-pill">Progress</button>
+                <button data-mode="sand" class="opt-pill high-rate" title="Active RAF sand physics">Sand Timer</button>
+                <button data-mode="binary" class="opt-pill">Binary BCD</button>
+            </div>
+
+            <!-- Time & Precision -->
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
+                <label class="section-label" style="margin-bottom: 0;">Time & Precision</label>
+                <span style="font-size: 10px; color: #71717a;">
+                    <span style="color: #2bd999;">●</span> 0 Hz &nbsp;
+                    <span style="color: #f59e0b;">●</span> Active RAF
+                </span>
+            </div>
+            <div class="pill-grid grid-3">
+                <button id="opt-24h" class="opt-pill selected">24-Hour</button>
+                <button id="opt-seconds" class="opt-pill high-rate">Seconds (:SS)</button>
+                <button id="opt-ms" class="opt-pill high-rate">Millisec (.ms)</button>
+            </div>
+            <div class="pill-grid grid-3">
+                <button id="opt-blink" class="opt-pill high-rate">Blink Colon</button>
+                <button id="opt-fps" class="opt-pill" title="Real-time measured frame rate monitor">Live FPS</button>
+            </div>
+
+            <!-- Date Format -->
+            <label class="section-label">Date Format</label>
+            <div class="pill-grid grid-3" id="date-format-group">
+                <button data-datefmt="dmy" class="opt-pill selected" title="Full: Thursday 31 December 2026">Full</button>
+                <button data-datefmt="jp" class="opt-pill" title="日本: 2026年10月25日 (日)">日本</button>
+                <button data-datefmt="mdy" class="opt-pill" title="American: Wednesday, October 21, 2026">American</button>
+                <button data-datefmt="iso" class="opt-pill" title="Numeric: 2026-10-25 (Sun)">Numeric</button>
+                <button data-datefmt="short" class="opt-pill" title="Short: Sun, 25 Oct 2026">Short</button>
+                <button data-datefmt="hidden" class="opt-pill" title="Off: Hide date display">Off</button>
+            </div>
+
+            <!-- Hourly Acoustic Chime (Web Audio API) -->
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
+                <label class="section-label" style="margin-bottom: 0;">Hourly Chime</label>
+                <span style="font-size: 10px; color: #71717a;">Web Audio • 0 Assets</span>
+            </div>
+            <div class="pill-grid grid-4" id="chime-group" style="margin-bottom: 0.5rem;">
+                <button data-chime="off" class="opt-pill selected">Off</button>
+                <button data-chime="bell" class="opt-pill">Bell</button>
+                <button data-chime="beep" class="opt-pill">Digital</button>
+                <button id="test-chime-btn" class="opt-pill" title="Preview chime sound" style="color: var(--clock-color);">Preview ♫</button>
+            </div>
         </div>
 
-        <!-- Date Format -->
-        <label class="section-label">Date Format</label>
-        <div class="pill-grid grid-3" id="date-format-group">
-            <button data-datefmt="dmy" class="opt-pill selected" title="Full: Thursday 31 December 2026">Full</button>
-            <button data-datefmt="jp" class="opt-pill" title="日本: 2026年10月25日 (日)">日本</button>
-            <button data-datefmt="mdy" class="opt-pill" title="American: Wednesday, October 21, 2026">American</button>
-            <button data-datefmt="iso" class="opt-pill" title="Numeric: 2026-10-25 (Sun)">Numeric</button>
-            <button data-datefmt="short" class="opt-pill" title="Short: Sun, 25 Oct 2026">Short</button>
-            <button data-datefmt="hidden" class="opt-pill" title="Off: Hide date display">Off</button>
-        </div>
-
-        <!-- Lazy Procedural Backgrounds -->
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
-            <label class="section-label" style="margin-bottom: 0;">Animated Background</label>
-            <span style="font-size: 10px; color: #71717a;">On-Demand ~15 FPS Side-Panel</span>
-        </div>
-        <div class="pill-grid grid-3" id="bg-anim-group">
-            <button data-bg="none" class="opt-pill selected">Pure Solid</button>
-            <button data-bg="tod" class="opt-pill" title="Adaptive celestial sky based on hour of day">Time of Day</button>
-            <button data-bg="aurora" class="opt-pill">Aurora Silk</button>
-            <button data-bg="stars" class="opt-pill">Starfield</button>
-            <button data-bg="matrix" class="opt-pill">Matrix Rain</button>
-            <button data-bg="fire" class="opt-pill">Ember Fire</button>
-            <button data-bg="water" class="opt-pill">Deep Water</button>
-            <button data-bg="static" class="opt-pill">CRT Static</button>
-            <button data-bg="grid" class="opt-pill" title="Retro-futuristic perspective synth grid">Cyber Grid</button>
-        </div>
+        <!-- TAB 2: VISUALS -->
+        <div class="drawer-pane" data-tab-panel="visuals">
 
         <!-- Themes & Custom Pickers -->
         <label class="section-label">Color Theme</label>
@@ -1307,56 +1418,110 @@
             </label>
         </div>
 
-        <!-- Hourly Acoustic Chime (Web Audio API) -->
-        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
-            <label class="section-label" style="margin-bottom: 0;">Hourly Chime</label>
-            <span style="font-size: 10px; color: #71717a;">Web Audio • 0 Assets</span>
-        </div>
-        <div class="pill-grid grid-4" id="chime-group" style="margin-bottom: 1rem;">
-            <button data-chime="off" class="opt-pill selected">Off</button>
-            <button data-chime="bell" class="opt-pill">Bell</button>
-            <button data-chime="beep" class="opt-pill">Digital</button>
-            <button id="test-chime-btn" class="opt-pill" title="Preview chime sound" style="color: var(--clock-color);">Preview ♫</button>
-        </div>
-
-        <!-- Fonts -->
-        <label class="section-label">Font Face</label>
-        <div class="pill-grid grid-3" id="font-group">
-            <button data-font="'Orbitron', sans-serif" class="opt-pill selected" style="font-family: 'Orbitron', sans-serif;">Orbitron</button>
-            <button data-font="'Share Tech Mono', monospace" class="opt-pill" style="font-family: 'Share Tech Mono', monospace;">Tech Mono</button>
-            <button data-font="'JetBrains Mono', monospace" class="opt-pill" style="font-family: 'JetBrains Mono', monospace;">JetBrains</button>
-            <button data-font="'Inter', sans-serif" class="opt-pill" style="font-family: 'Inter', sans-serif;">Modern Sans</button>
-            <button data-font="'Silkscreen', monospace" class="opt-pill" style="font-family: 'Silkscreen', monospace;">Pixel LED</button>
-            <button data-font="'Cinzel', serif" class="opt-pill" style="font-family: 'Cinzel', serif;">Chronos</button>
-        </div>
-
-        <!-- Panel De-Energizer / Blackout Mode -->
-        <div class="blanker-panel">
-            <div class="blanker-header">
-                <div>
-                    <label class="section-label" style="margin-bottom: 0;">Panel De-Energizer</label>
-                    <div style="font-size: 10px; color: #a1a1aa;">Rest OLED/LCD pixels while keeping system awake</div>
-                </div>
-                <button id="drawer-blank-now-btn" class="blank-action-btn">Blank Now (B)</button>
+            <!-- Fonts -->
+            <label class="section-label">Font Face</label>
+            <div class="pill-grid grid-3" id="font-group">
+                <button data-font="'Orbitron', sans-serif" class="opt-pill selected" style="font-family: 'Orbitron', sans-serif;">Orbitron</button>
+                <button data-font="'Share Tech Mono', monospace" class="opt-pill" style="font-family: 'Share Tech Mono', monospace;">Tech Mono</button>
+                <button data-font="'JetBrains Mono', monospace" class="opt-pill" style="font-family: 'JetBrains Mono', monospace;">JetBrains</button>
+                <button data-font="'Inter', sans-serif" class="opt-pill" style="font-family: 'Inter', sans-serif;">Modern Sans</button>
+                <button data-font="'Silkscreen', monospace" class="opt-pill" style="font-family: 'Silkscreen', monospace;">Pixel LED</button>
+                <button data-font="'Cinzel', serif" class="opt-pill" style="font-family: 'Cinzel', serif;">Chronos</button>
+                <button data-font="'Nixie One', sans-serif" class="opt-pill" style="font-family: 'Nixie One', sans-serif;">Nixie</button>
+                <button data-font="sevenseg" class="opt-pill">7-Segment</button>
             </div>
-            <div class="pill-grid grid-2" style="margin-bottom: 0;">
-                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.035); padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.09);">
-                    <span style="font-size: 11px; color: #a1a1aa;">Tint</span>
-                    <div style="display: flex; gap: 5px; align-items: center;">
-                        <span class="swatch-dot blank-swatch" data-color="#000000" style="background: #000; border: 1px solid #555; cursor: pointer;"></span>
-                        <span class="swatch-dot blank-swatch" data-color="#050811" style="background: #050811; border: 1px solid #444; cursor: pointer;"></span>
-                        <span class="swatch-dot blank-swatch" data-color="#0d0604" style="background: #0d0604; border: 1px solid #444; cursor: pointer;"></span>
+
+            <!-- Typography & Digit FX -->
+            <label class="section-label">Typography & FX</label>
+            <div class="pill-grid grid-3" style="margin-bottom: 0;">
+                <button id="opt-slash-zero" class="opt-pill selected">Slashed Zero</button>
+                <button id="opt-text-glow" class="opt-pill selected" title="Toggle neon text bloom filter">Text Glow</button>
+                <button id="opt-flicker" class="opt-pill" title="Subtle Nixie-style filament micro-flicker (pauses in Eco)">Flicker</button>
+            </div>
+        </div>
+
+        <!-- TAB 3: ANIMATION STUDIO -->
+        <div class="drawer-pane" data-tab-panel="studio">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;">
+                <label class="section-label" style="margin-bottom: 0;">Animated Background</label>
+                <span style="font-size: 10px; color: #71717a;">On-Demand ~15 FPS</span>
+            </div>
+            <div class="pill-grid grid-3" id="bg-anim-group">
+                <button data-bg="none" class="opt-pill zero-idle selected" title="0 Hz deep sleep">Pure Solid</button>
+                <button data-bg="tod" class="opt-pill high-rate" title="Adaptive celestial sky based on hour of day">Time of Day</button>
+                <button data-bg="aurora" class="opt-pill high-rate">Aurora Silk</button>
+                <button data-bg="stars" class="opt-pill high-rate">Starfield</button>
+                <button data-bg="matrix" class="opt-pill high-rate">Matrix Rain</button>
+                <button data-bg="cmatrix" class="opt-pill high-rate" title="Authentic discrete terminal cmatrix">C-Matrix</button>
+                <button data-bg="pixelrain" class="opt-pill high-rate" title="Minimalist retro pixel droplets">Pixel Rain</button>
+                <button data-bg="lasers" class="opt-pill high-rate" title="Geometric horizontal & vertical laser scans">Lasers</button>
+                <button data-bg="tetriminos" class="opt-pill high-rate" title="Gently drifting rotating polyominos">Tetriminos</button>
+                <button data-bg="fire" class="opt-pill high-rate">Ember Fire</button>
+                <button data-bg="water" class="opt-pill high-rate">Deep Water</button>
+                <button data-bg="static" class="opt-pill high-rate">CRT Static</button>
+                <button data-bg="grid" class="opt-pill high-rate" title="Retro-futuristic perspective synth grid">Cyber Grid</button>
+                <button data-bg="fireflies" class="opt-pill high-rate" title="Gentle wandering bioluminescent fireflies">Fireflies</button>
+            </div>
+
+            <label class="section-label">Shader Parameters</label>
+            <div class="studio-slider-row">
+                <span style="font-size: 11px; color: #a1a1aa; min-width: 52px;">Speed</span>
+                <input type="range" id="studio-speed-slider" min="0.25" max="2.5" step="0.25" value="1">
+                <span id="studio-speed-val" style="font-size: 11px; color: #fff; min-width: 34px; text-align: right;">1.0x</span>
+            </div>
+            <div class="studio-slider-row">
+                <span style="font-size: 11px; color: #a1a1aa; min-width: 52px;">Density</span>
+                <input type="range" id="studio-density-slider" min="0.5" max="2.0" step="0.25" value="1">
+                <span id="studio-density-val" style="font-size: 11px; color: #fff; min-width: 34px; text-align: right;">1.0x</span>
+            </div>
+        </div>
+
+        <!-- TAB 4: POWER & BACKUP -->
+        <div class="drawer-pane" data-tab-panel="power">
+            <label class="section-label">Power & Display Health</label>
+            <div class="pill-grid grid-2" style="margin-bottom: 0.9rem;">
+                <button id="opt-eco-governor" class="opt-pill" title="Suppress all high-speed animations, milliseconds, and seconds to enforce 0.016 Hz deep sleep">
+                    <span class="swatch-dot" style="background: #2bd999;"></span>Eco Governor
+                </button>
+                <button id="opt-drift" class="opt-pill" title="Subtle pixel shift every 30s to prevent OLED/LCD retention">Anti-Burn Drift</button>
+            </div>
+
+            <!-- Panel De-Energizer / Blackout Mode -->
+            <div class="blanker-panel" style="margin-top: 0; margin-bottom: 0.9rem;">
+                <div class="blanker-header">
+                    <div>
+                        <label class="section-label" style="margin-bottom: 0;">Panel De-Energizer</label>
+                        <div style="font-size: 10px; color: #a1a1aa;">Rest OLED/LCD pixels while keeping system awake</div>
+                    </div>
+                    <button id="drawer-blank-now-btn" class="blank-action-btn">Blank Now (B)</button>
+                </div>
+                <div class="pill-grid grid-2" style="margin-bottom: 0;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.035); padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.09);">
+                        <span style="font-size: 11px; color: #a1a1aa;">Tint</span>
+                        <div style="display: flex; gap: 5px; align-items: center;">
+                            <span class="swatch-dot blank-swatch" data-color="#000000" style="background: #000; border: 1px solid #555; cursor: pointer;"></span>
+                            <span class="swatch-dot blank-swatch" data-color="#050811" style="background: #050811; border: 1px solid #444; cursor: pointer;"></span>
+                            <span class="swatch-dot blank-swatch" data-color="#0d0604" style="background: #0d0604; border: 1px solid #444; cursor: pointer;"></span>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.035); padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.09);">
+                        <span style="font-size: 11px; color: #a1a1aa;">Auto</span>
+                        <select id="auto-blank-select" style="background: transparent; color: #fff; border: none; font-size: 11px; cursor: pointer; outline: none;">
+                            <option value="0" style="background: #111;">Off</option>
+                            <option value="5" style="background: #111;">5 min</option>
+                            <option value="15" style="background: #111;">15 min</option>
+                            <option value="30" style="background: #111;">30 min</option>
+                        </select>
                     </div>
                 </div>
-                <div style="display: flex; align-items: center; justify-content: space-between; background: rgba(255,255,255,0.035); padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.09);">
-                    <span style="font-size: 11px; color: #a1a1aa;">Auto</span>
-                    <select id="auto-blank-select" style="background: transparent; color: #fff; border: none; font-size: 11px; cursor: pointer; outline: none;">
-                        <option value="0" style="background: #111;">Off</option>
-                        <option value="5" style="background: #111;">5 min</option>
-                        <option value="15" style="background: #111;">15 min</option>
-                        <option value="30" style="background: #111;">30 min</option>
-                    </select>
-                </div>
+            </div>
+
+            <!-- JSON Preset Backup -->
+            <label class="section-label">Preset Backup (JSON)</label>
+            <div class="pill-grid grid-3" style="margin-bottom: 0;">
+                <button id="preset-export-btn" class="opt-pill" title="Copy & download JSON preset">Export</button>
+                <button id="preset-import-btn" class="opt-pill" title="Paste JSON preset to restore">Import</button>
+                <button id="preset-reset-btn" class="opt-pill" style="color: #fb7185;" title="Reset all settings to defaults">Reset</button>
             </div>
         </div>
     </aside>
@@ -1511,7 +1676,10 @@
             showFps: false,
             measuredFps: 0,
             dateFormat: 'dmy',         // 'dmy' | 'jp' | 'mdy' | 'iso' | 'short' | 'hidden'
-            bgAnim: 'none',            // 'none' | 'tod' | 'aurora' | 'stars' | 'matrix' | 'fire' | 'water' | 'static' | 'grid'
+            bgAnim: 'none',            // 'none' | 'tod' | 'aurora' | 'stars' | 'matrix' | 'cmatrix' | 'pixelrain' | 'lasers' | 'tetriminos' | 'fire' | 'water' | 'static' | 'grid' | 'fireflies'
+            filamentFlicker: false,
+            animSpeed: 1.0,
+            animDensity: 1.0,
             theme: 'emerald',
             clockColor: '#2bd999',
             dateColor: '#24b880',
@@ -1639,6 +1807,9 @@
                     textGlow: state.textGlow,
                     antiBurnDrift: state.antiBurnDrift,
                     showFps: state.showFps,
+                    filamentFlicker: state.filamentFlicker,
+                    animSpeed: state.animSpeed,
+                    animDensity: state.animDensity,
                     dateFormat: state.dateFormat,
                     bgAnim: state.bgAnim,
                     theme: state.theme,
@@ -1730,15 +1901,18 @@
             const glowActive = state.textGlow !== false;
             root.style.setProperty('--glow-primary', glowActive ? hexToRgba(state.clockColor, state.ecoMode ? 0.25 : 0.52) : 'transparent');
             root.style.setProperty('--glow-secondary', glowActive ? hexToRgba(state.clockColor, state.ecoMode ? 0.08 : 0.22) : 'transparent');
-            root.style.setProperty('--clock-font', state.fontFamily);
+            const isSevenSeg = state.fontFamily === 'sevenseg';
+            root.style.setProperty('--clock-font', isSevenSeg ? "'Share Tech Mono', monospace" : state.fontFamily);
 
             // Font-specific slot widths to eliminate digit melding
             let slotW = '0.70em';
-            if (state.fontFamily.includes('Orbitron')) slotW = '0.74em';
+            if (isSevenSeg) slotW = '0.68em';
+            else if (state.fontFamily.includes('Orbitron')) slotW = '0.74em';
             else if (state.fontFamily.includes('Silkscreen')) slotW = '0.76em';
             else if (state.fontFamily.includes('Mono')) slotW = '0.68em';
             else if (state.fontFamily.includes('Inter')) slotW = '0.66em';
             else if (state.fontFamily.includes('Cinzel')) slotW = '0.70em';
+            else if (state.fontFamily.includes('Nixie')) slotW = '0.68em';
             root.style.setProperty('--digit-slot-width', slotW);
 
             const scale = state.zoomPercent / 200;
@@ -1750,6 +1924,7 @@
             document.body.classList.toggle('dimmed', bLevel < 1);
 
             document.body.classList.toggle('slashed-zero-on', state.slashedZero);
+            document.body.classList.toggle('filament-flicker', !!state.filamentFlicker);
             document.body.classList.toggle('eco-governor', state.ecoMode);
             document.body.classList.toggle('crt-anim-active', state.bgAnim === 'static');
             blankerOverlay.style.backgroundColor = state.blankColor;
@@ -1773,8 +1948,45 @@
          * ZERO-GARBAGE TEXT UPDATER
          * Compares text before setting; applies attribute only when modified.
          */
+        const SEVEN_SEG_MAP = {
+            '0': [1,1,1,1,1,1,0],
+            '1': [0,1,1,0,0,0,0],
+            '2': [1,1,0,1,1,0,1],
+            '3': [1,1,1,1,0,0,1],
+            '4': [0,1,1,0,0,1,1],
+            '5': [1,0,1,1,0,1,1],
+            '6': [1,0,1,1,1,1,1],
+            '7': [1,1,1,0,0,0,0],
+            '8': [1,1,1,1,1,1,1],
+            '9': [1,1,1,1,0,1,1]
+        };
+        const SEVEN_SEG_POLYS = [
+            '12,6 48,6 42,14 18,14',     // a (top)
+            '50,8 54,14 51,46 46,49 43,44 46,15', // b (top-right)
+            '46,52 50,55 47,86 41,92 38,85 41,56', // c (bot-right)
+            '11,86 39,86 43,94 7,94',    // d (bottom)
+            '8,55 13,52 16,56 13,85 6,92 4,86',   // e (bot-left)
+            '10,14 14,8 18,15 15,44 10,49 6,46',  // f (top-left)
+            '13,46 44,46 47,50 43,54 12,54 9,50'  // g (middle)
+        ];
+
         function setDigitSlot(el, char) {
-            if (el.textContent !== char) {
+            if (state.fontFamily === 'sevenseg' && SEVEN_SEG_MAP[char]) {
+                const mask = SEVEN_SEG_MAP[char];
+                let svg = el.firstElementChild;
+                if (!svg || !svg.classList.contains('seg7-svg')) {
+                    el.innerHTML = `<svg class="seg7-svg" viewBox="0 0 60 100" aria-hidden="true">${SEVEN_SEG_POLYS.map((pts, i) => `<polygon class="seg7-seg ${mask[i] ? 'seg7-on' : 'seg7-off'}" points="${pts}"/>`).join('')}</svg>`;
+                    el.setAttribute('data-char', char);
+                } else if (el.getAttribute('data-char') !== char) {
+                    const polys = svg.children;
+                    for (let i = 0; i < 7; i++) {
+                        polys[i].className.baseVal = `seg7-seg ${mask[i] ? 'seg7-on' : 'seg7-off'}`;
+                    }
+                    el.setAttribute('data-char', char);
+                }
+                return;
+            }
+            if (el.firstElementChild || el.textContent !== char) {
                 el.textContent = char;
                 el.setAttribute('data-char', char);
             }
@@ -2518,6 +2730,7 @@
             viewSand.classList.toggle('active', state.clockMode === 'sand');
             if (viewBinary) viewBinary.classList.toggle('active', state.clockMode === 'binary');
 
+            updateClock();
             scheduleNextClockTick();
         }
 
@@ -2533,11 +2746,26 @@
             cols: [],
             embers: [],
             ripples: [],
+            fireflies: [],
+            gridPulses: [],
+            cmatrixCols: [],
+            pixelDrops: [],
+            lasers: [],
+            tetriminos: [],
             phase: 0,
             staticCanvas: null,
             staticCtx: null,
             staticImgData: null,
-            staticBuf32: null
+            staticBuf32: null,
+            staticWarpY: null,
+            staticBezel: null,
+            waterCanvas: null,
+            waterCtx: null,
+            waterImgData: null,
+            waterBuf32: null,
+            waterCurr: null,
+            waterPrev: null,
+            waterDropTimer: 0
         };
 
         function initBgCanvas() {
@@ -2571,8 +2799,8 @@
                     return { x, y, z, prevSx: sx, prevSy: sy };
                 });
             } else if (state.bgAnim === 'matrix') {
-                // 3D Parallax Matrix: Streams distributed across Depth Tiers (0: Far, 1: Mid, 2: Near)
-                const streamCount = Math.floor(w / 22);
+                // 3D Parallax Matrix: Sparser streams distributed across Depth Tiers (0: Far, 1: Mid, 2: Near)
+                const streamCount = Math.max(10, Math.floor(w / 44));
                 bgState.matrixStreams = Array.from({ length: streamCount }, () => {
                     const depthRoll = Math.random();
                     const tier = depthRoll < 0.45 ? 0 : (depthRoll < 0.80 ? 1 : 2); // 45% far, 35% mid, 20% near
@@ -2613,35 +2841,158 @@
                     };
                 });
             } else if (state.bgAnim === 'water') {
-                // 3D Perspective Ripples: Elliptical foreshortening spanning full screen height
-                bgState.ripples = Array.from({ length: 8 }, () => {
-                    const y = Math.random() * h;
-                    const depthRatio = Math.max(0.15, y / h); // Continuous depth from top (far) to bottom (near)
-                    return {
-                        x: Math.random() * w,
-                        y,
-                        depthRatio,
-                        r: Math.random() * 60,
-                        maxR: 90 + depthRatio * 180,
-                        speed: 0.35 + depthRatio * 0.85
-                    };
-                });
+                // 2D Shallow-Water Wave Physics (240x135 isotropic offscreen solver, zero-alloc swap)
+                const ww = 240, wh = 135;
+                const wc = document.createElement('canvas');
+                wc.width = ww;
+                wc.height = wh;
+                bgState.waterCanvas = wc;
+                bgState.waterCtx = wc.getContext('2d');
+                bgState.waterImgData = bgState.waterCtx.createImageData(ww, wh);
+                bgState.waterBuf32 = new Uint32Array(bgState.waterImgData.data.buffer);
+                bgState.waterCurr = new Float32Array(ww * wh);
+                bgState.waterPrev = new Float32Array(ww * wh);
+                bgState.waterDropTimer = 0;
+                // Seed one initial gentle drop
+                const sx = 40 + Math.floor(Math.random() * (ww - 80));
+                const sy = 25 + Math.floor(Math.random() * (wh - 50));
+                bgState.waterPrev[sy * ww + sx] = 1.8;
             } else if (state.bgAnim === 'static') {
+                const scW = 240, scH = 135;
                 const sc = document.createElement('canvas');
-                sc.width = 240;
-                sc.height = 135;
+                sc.width = scW;
+                sc.height = scH;
                 bgState.staticCanvas = sc;
                 bgState.staticCtx = sc.getContext('2d');
-                bgState.staticImgData = bgState.staticCtx.createImageData(240, 135);
+                bgState.staticImgData = bgState.staticCtx.createImageData(scW, scH);
                 bgState.staticBuf32 = new Uint32Array(bgState.staticImgData.data.buffer);
-                bgState.staticDx2 = new Float32Array(240);
-                const halfW = 120;
-                for (let x = 0; x < 240; x++) {
-                    const nx = (x - halfW) / halfW;
-                    bgState.staticDx2[x] = nx * nx;
+
+                // Precompute smooth spherical fisheye barrel scanline & super-elliptical bulb bezel LUTs
+                const totalPx = scW * scH;
+                const scanMask = new Float32Array(totalPx);
+                const bezel = new Float32Array(totalPx);
+                const halfW = scW / 2;
+                const halfH = scH / 2;
+                let idx = 0;
+                for (let y = 0; y < scH; y++) {
+                    const ny = (y - halfH) / halfH;
+                    const ny2 = ny * ny;
+                    const ny4 = ny2 * ny2;
+                    for (let x = 0; x < scW; x++) {
+                        const nx = (x - halfW) / halfW;
+                        const nx2 = nx * nx;
+                        const r2 = nx2 + ny2;
+                        // Gentle convex barrel curve (k = 0.12) + smooth sine beam profile (zero moiré)
+                        const srcY = halfH + ny * (1 + 0.12 * r2) * halfH;
+                        scanMask[idx] = 0.5 + 0.5 * Math.sin(srcY * Math.PI);
+                        // Super-elliptical CRT glass corner falloff
+                        const se = nx2 * nx2 + ny4;
+                        if (se <= 0.78) {
+                            bezel[idx] = 1.0;
+                        } else {
+                            const t = Math.min(1.0, (se - 0.78) / 0.52);
+                            bezel[idx] = 1.0 - t * t * (3 - 2 * t);
+                        }
+                        idx++;
+                    }
                 }
+                bgState.staticWarpY = scanMask;
+                bgState.staticBezel = bezel;
             } else if (state.bgAnim === 'grid') {
                 bgState.gridOffset = 0;
+                bgState.gridPulses = [];
+            } else if (state.bgAnim === 'fireflies') {
+                // Hotaru (蛍): Gentle wandering bioluminescent motes
+                const count = Math.max(8, Math.round(30 * (state.animDensity || 1)));
+                bgState.fireflies = Array.from({ length: count }, () => {
+                    const depth = 0.35 + Math.random() * 0.65;
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = (0.18 + Math.random() * 0.24) * depth;
+                    return {
+                        x: Math.random() * w,
+                        y: Math.random() * h,
+                        vx: Math.cos(angle) * speed,
+                        vy: Math.sin(angle) * speed,
+                        angle,
+                        depth,
+                        baseR: 1.6 + depth * 2.0,
+                        blinkPhase: Math.random() * Math.PI * 2,
+                        blinkSpeed: 0.018 + Math.random() * 0.025
+                    };
+                });
+            } else if (state.bgAnim === 'cmatrix') {
+                // PLN-01: Authentic Terminal C-Matrix
+                const colW = 16;
+                const rowH = 18;
+                const numCols = Math.max(8, Math.floor(w / colW));
+                const maxRows = Math.ceil(h / rowH) + 2;
+                const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$%&*+-=<>';
+                const activeRatio = Math.min(0.95, 0.45 * (state.animDensity || 1));
+                bgState.cmatrixCols = [];
+                for (let c = 0; c < numCols; c++) {
+                    if (Math.random() > activeRatio) continue;
+                    const len = 6 + Math.floor(Math.random() * 14);
+                    bgState.cmatrixCols.push({
+                        x: c * colW,
+                        rowH,
+                        maxRows,
+                        headRow: Math.random() * -maxRows,
+                        speed: 0.22 + Math.random() * 0.35,
+                        length: len,
+                        chars: Array.from({ length: len }, () => chars[Math.floor(Math.random() * chars.length)])
+                    });
+                }
+            } else if (state.bgAnim === 'pixelrain') {
+                // PLN-01: Minimalist Retro Pixel Rain
+                const count = Math.max(15, Math.round(55 * (state.animDensity || 1)));
+                bgState.pixelDrops = Array.from({ length: count }, () => {
+                    const tier = Math.random() < 0.5 ? 0 : (Math.random() < 0.8 ? 1 : 2);
+                    return {
+                        tier,
+                        x: Math.random() * w,
+                        y: Math.random() * h,
+                        w: tier === 0 ? 2 : (tier === 1 ? 3 : 4),
+                        h: tier === 0 ? 8 : (tier === 1 ? 14 : 20),
+                        vy: tier === 0 ? (1.2 + Math.random()) : (tier === 1 ? (2.2 + Math.random() * 1.4) : (3.6 + Math.random() * 1.8)),
+                        alpha: tier === 0 ? 0.32 : (tier === 1 ? 0.62 : 0.92)
+                    };
+                });
+            } else if (state.bgAnim === 'lasers') {
+                // PLN-01: Random Geometric Laser Scans
+                const count = Math.max(3, Math.round(7 * (state.animDensity || 1)));
+                bgState.lasers = Array.from({ length: count }, () => {
+                    const isHoriz = Math.random() < 0.5;
+                    return {
+                        isHoriz,
+                        pos: isHoriz ? Math.random() * h : Math.random() * w,
+                        vel: (Math.random() < 0.5 ? 1 : -1) * (1.8 + Math.random() * 3.4),
+                        thickness: 1 + Math.random() * 1.8,
+                        alpha: 0.35 + Math.random() * 0.55
+                    };
+                });
+            } else if (state.bgAnim === 'tetriminos') {
+                // PLN-01: Gently Drifting Rotating Tetriminos
+                const shapes = [
+                    [[0,0],[1,0],[2,0],[3,0]], // I
+                    [[0,0],[1,0],[0,1],[1,1]], // O
+                    [[1,0],[0,1],[1,1],[2,1]], // T
+                    [[1,0],[2,0],[0,1],[1,1]], // S
+                    [[0,0],[1,0],[1,1],[2,1]], // Z
+                    [[0,0],[0,1],[1,1],[2,1]], // J
+                    [[2,0],[0,1],[1,1],[2,1]]  // L
+                ];
+                const count = Math.max(6, Math.round(14 * (state.animDensity || 1)));
+                bgState.tetriminos = Array.from({ length: count }, () => ({
+                    shape: shapes[Math.floor(Math.random() * shapes.length)],
+                    x: Math.random() * w,
+                    y: Math.random() * h,
+                    vx: (Math.random() - 0.5) * 0.45,
+                    vy: 0.15 + Math.random() * 0.35,
+                    angle: Math.random() * Math.PI * 2,
+                    rotSpeed: (Math.random() - 0.5) * 0.015,
+                    cell: 10 + Math.random() * 10,
+                    alpha: 0.18 + Math.random() * 0.32
+                }));
             }
         }
 
@@ -2654,7 +3005,8 @@
             if (!bgCtx) return;
             const w = bgCanvas.width;
             const h = bgCanvas.height;
-            bgState.phase += 0.02;
+            const spd = state.animSpeed || 1.0;
+            bgState.phase += 0.02 * spd;
             const rgb = hexToRgb(state.clockColor);
             const dateRgb = hexToRgb(state.dateColor);
             const bgRgb = hexToRgb(state.bgColor);
@@ -2662,8 +3014,8 @@
 
             switch (state.bgAnim) {
                 case 'matrix': {
-                    // Semitransparent background wash creates smooth trailing echo
-                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.28);
+                    // Semitransparent background wash creates smooth, longer trailing echo
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.11);
                     bgCtx.fillRect(0, 0, w, h);
                     const chars = '0123456789ABCDEFﾊﾐﾋｰｳｼﾅﾓﾆｻﾜﾂｵﾘｱﾎ';
                     const streams = bgState.matrixStreams || [];
@@ -2778,10 +3130,17 @@
 
                 case 'fire': {
                     bgCtx.clearRect(0, 0, w, h);
-                    const baseGrad = bgCtx.createLinearGradient(0, h * 0.45, 0, h);
-                    baseGrad.addColorStop(0, 'rgba(0,0,0,0)');
-                    baseGrad.addColorStop(1, `rgba(${bgAccentRgb.r}, ${Math.floor(bgAccentRgb.g * 0.5)}, 10, 0.45)`);
-                    bgCtx.fillStyle = baseGrad;
+                    // Dancing Campfire Hearth Glow: harmonic multi-sine horizontal/vertical modulation
+                    const t = bgState.phase;
+                    const hearthX = w * (0.5 + 0.08 * Math.sin(t * 1.3) + 0.04 * Math.cos(t * 2.9));
+                    const hearthY = h * 1.05;
+                    const hearthR = Math.max(w * 0.55, h * (0.52 + 0.07 * Math.sin(t * 1.9) + 0.03 * Math.sin(t * 4.1)));
+                    const hearthAlpha = 0.42 + 0.12 * Math.sin(t * 2.3) + 0.06 * Math.cos(t * 5.7);
+                    const hearthGrad = bgCtx.createRadialGradient(hearthX, hearthY, 10, hearthX, hearthY, hearthR);
+                    hearthGrad.addColorStop(0, `rgba(${bgAccentRgb.r}, ${Math.floor(bgAccentRgb.g * 0.55)}, 12, ${hearthAlpha.toFixed(3)})`);
+                    hearthGrad.addColorStop(0.55, `rgba(${bgAccentRgb.r}, ${Math.floor(bgAccentRgb.g * 0.35)}, 8, ${(hearthAlpha * 0.35).toFixed(3)})`);
+                    hearthGrad.addColorStop(1, 'rgba(0,0,0,0)');
+                    bgCtx.fillStyle = hearthGrad;
                     bgCtx.fillRect(0, 0, w, h);
 
                     // Sort/render by depth tier: Far (dim, slow, small) -> Near (bright, fast, large)
@@ -2812,28 +3171,68 @@
                 }
 
                 case 'water': {
-                    bgCtx.clearRect(0, 0, w, h);
-                    for (const rp of bgState.ripples) {
-                        rp.r += rp.speed;
-                        const alpha = Math.max(0, (1 - rp.r / rp.maxR) * (0.35 + rp.depthRatio * 0.45));
-                        
-                        // 3D Perspective Foreshortening: Ellipse flattened on the Y-axis according to distance
-                        const radiusY = rp.r * (0.32 + rp.depthRatio * 0.28);
-                        bgCtx.beginPath();
-                        bgCtx.ellipse(rp.x, rp.y, rp.r, radiusY, 0, 0, Math.PI * 2);
-                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${alpha.toFixed(3)})`;
-                        bgCtx.lineWidth = 1.2 + rp.depthRatio * 1.5;
-                        bgCtx.stroke();
+                    if (!bgState.waterCanvas || !bgState.waterCurr || !bgState.waterPrev) {
+                        initBgCanvas();
+                    }
+                    if (!bgState.waterCanvas) break;
 
-                        if (rp.r >= rp.maxR) {
-                            rp.r = 2;
-                            rp.x = Math.random() * w;
-                            rp.y = Math.random() * h;
-                            rp.depthRatio = Math.max(0.15, rp.y / h);
-                            rp.maxR = 90 + rp.depthRatio * 180;
-                            rp.speed = 0.35 + rp.depthRatio * 0.85;
+                    const ww = 240, wh = 135;
+                    let curr = bgState.waterCurr;
+                    let prev = bgState.waterPrev;
+                    const buf = bgState.waterBuf32;
+
+                    // Occasional raindrop impulse scaled by Density & Speed
+                    bgState.waterDropTimer -= spd * (state.animDensity || 1);
+                    if (bgState.waterDropTimer <= 0) {
+                        const dx = 10 + Math.floor(Math.random() * (ww - 20));
+                        const dy = 10 + Math.floor(Math.random() * (wh - 20));
+                        const amp = 1.4 + Math.random() * 0.9;
+                        const cIdx = dy * ww + dx;
+                        prev[cIdx] += amp;
+                        prev[cIdx - 1] += amp * 0.5;
+                        prev[cIdx + 1] += amp * 0.5;
+                        prev[cIdx - ww] += amp * 0.5;
+                        prev[cIdx + ww] += amp * 0.5;
+                        bgState.waterDropTimer = 18 + Math.random() * 34;
+                    }
+
+                    // 2D Wave Equation Solver + Glassy Slope Shading
+                    const ar = bgAccentRgb.r, ag = bgAccentRgb.g, ab = bgAccentRgb.b;
+                    const br = bgRgb.r, bgVal = bgRgb.g, bb = bgRgb.b;
+                    const basePx = (255 << 24) | (bb << 16) | (bgVal << 8) | br;
+                    buf.fill(basePx);
+
+                    for (let y = 1; y < wh - 1; y++) {
+                        const row = y * ww;
+                        for (let x = 1; x < ww - 1; x++) {
+                            const idx = row + x;
+                            // 8-neighbor isotropic stencil (0.35 ortho + 0.15 diag) for circular ripples
+                            const ortho = prev[idx - 1] + prev[idx + 1] + prev[idx - ww] + prev[idx + ww];
+                            const diag = prev[idx - ww - 1] + prev[idx - ww + 1] + prev[idx + ww - 1] + prev[idx + ww + 1];
+                            const val = (ortho * 0.35 + diag * 0.15 - curr[idx]) * 0.984;
+                            curr[idx] = val;
+
+                            // Surface slope + crest illumination
+                            const slope = (curr[idx + 1] - curr[idx - 1]) + (curr[idx + ww] - curr[idx - ww]);
+                            const light = Math.min(1.0, Math.max(0.0, slope * 0.55 + Math.abs(val) * 0.35));
+                            if (light > 0.01) {
+                                const r = Math.min(255, br + (ar - br) * light) | 0;
+                                const g = Math.min(255, bgVal + (ag - bgVal) * light) | 0;
+                                const b = Math.min(255, bb + (ab - bb) * light) | 0;
+                                buf[idx] = (255 << 24) | (b << 16) | (g << 8) | r;
+                            }
                         }
                     }
+
+                    // Swap heightfield buffers (zero allocation)
+                    bgState.waterCurr = prev;
+                    bgState.waterPrev = curr;
+
+                    bgState.waterCtx.putImageData(bgState.waterImgData, 0, 0);
+                    bgCtx.clearRect(0, 0, w, h);
+                    bgCtx.imageSmoothingEnabled = true;
+                    bgCtx.imageSmoothingQuality = 'high';
+                    bgCtx.drawImage(bgState.waterCanvas, 0, 0, w, h);
                     break;
                 }
 
@@ -2871,60 +3270,40 @@
                 }
 
                 case 'static': {
-                    if (!bgState.staticCanvas || !bgState.staticCtx || !bgState.staticBuf32) {
+                    if (!bgState.staticCanvas || !bgState.staticCtx || !bgState.staticBuf32 || !bgState.staticWarpY) {
                         initBgCanvas();
                     }
                     if (!bgState.staticCanvas) break;
 
-                    const scW = bgState.staticCanvas.width;
-                    const scH = bgState.staticCanvas.height;
                     const buf = bgState.staticBuf32;
-                    const dx2 = bgState.staticDx2;
-                    const halfH = scH / 2;
+                    const scanMask = bgState.staticWarpY;
+                    const bezel = bgState.staticBezel;
+                    const totalPx = buf.length;
                     const ar = bgAccentRgb.r, ag = bgAccentRgb.g, ab = bgAccentRgb.b;
                     const br = bgRgb.r, bgVal = bgRgb.g, bb = bgRgb.b;
 
-                    // Direct Co-Rasterization with Barrel Curvature:
-                    // Scanlines bow outward toward edges via spherical bulb formula
-                    let idx = 0;
-                    for (let y = 0; y < scH; y++) {
-                        const ny = (y - halfH) / halfH;
-                        const dyFactor = ny * 5.2;
-                        for (let x = 0; x < scW; x++) {
-                            const curvedY = (y + (dx2 ? dx2[x] : 0) * dyFactor) | 0;
-                            const isScanline = (curvedY & 1) === 1; // Spherical warped scanline
-                            const n = Math.random();
-                            if (isScanline) {
-                                // TVL beam gap / shadow mask: dimmed phosphor floor
-                                const dim = n * 0.10;
-                                const r = (br + (ar - br) * dim) | 0;
-                                const g = (bgVal + (ag - bgVal) * dim) | 0;
-                                const b = (bb + (ab - bb) * dim) | 0;
-                                buf[idx++] = (255 << 24) | (b << 16) | (g << 8) | r;
-                            } else {
-                                // Active phosphor scanline: calibrated soft atmospheric floor
-                                const intensity = n > 0.40 ? (n * 0.42) : (n * 0.15);
-                                const spark = (n > 0.94 ? 18 : 0);
-                                const r = Math.min(255, (br + (ar - br) * intensity + spark)) | 0;
-                                const g = Math.min(255, (bgVal + (ag - bgVal) * intensity + spark)) | 0;
-                                const b = Math.min(255, (bb + (ab - bb) * intensity + spark)) | 0;
-                                buf[idx++] = (255 << 24) | (b << 16) | (g << 8) | r;
-                            }
+                    // Direct Co-Rasterization with Smooth Fisheye Barrel Curvature & Super-Elliptical Bezel
+                    for (let idx = 0; idx < totalPx; idx++) {
+                        const bz = bezel[idx];
+                        if (bz <= 0.01) {
+                            buf[idx] = (255 << 24) | (bb << 16) | (bgVal << 8) | br;
+                            continue;
                         }
+                        const beam = 0.15 + 0.85 * scanMask[idx];
+                        const n = Math.random();
+                        const base = n > 0.40 ? (n * 0.42) : (n * 0.15);
+                        const spark = (n > 0.94 ? 18 : 0);
+                        const intensity = base * beam * bz;
+                        const r = Math.min(255, (br + (ar - br) * intensity + spark * beam * bz)) | 0;
+                        const g = Math.min(255, (bgVal + (ag - bgVal) * intensity + spark * beam * bz)) | 0;
+                        const b = Math.min(255, (bb + (ab - bb) * intensity + spark * beam * bz)) | 0;
+                        buf[idx] = (255 << 24) | (b << 16) | (g << 8) | r;
                     }
                     bgState.staticCtx.putImageData(bgState.staticImgData, 0, 0);
 
                     bgCtx.clearRect(0, 0, w, h);
                     bgCtx.imageSmoothingEnabled = false;
                     bgCtx.drawImage(bgState.staticCanvas, 0, 0, w, h);
-
-                    // CRT Curved Phosphor Bulb Edge Vignette
-                    const vig = bgCtx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.72);
-                    vig.addColorStop(0, 'rgba(0,0,0,0)');
-                    vig.addColorStop(0.7, 'rgba(0,0,0,0.32)');
-                    vig.addColorStop(1, 'rgba(0,0,0,0.80)');
-                    bgCtx.fillStyle = vig;
-                    bgCtx.fillRect(0, 0, w, h);
                     break;
                 }
 
@@ -2935,36 +3314,26 @@
                     // Off-Screen Horizon: Vanishing point sits above the top of the viewport
                     // Guarantees zero focal hotspot / zero burn-in risk across the visible screen
                     const horizonY = -h * 0.28;
-                    bgState.gridOffset = ((bgState.gridOffset || 0) + 0.65) % 40;
+                    bgState.gridOffset = ((bgState.gridOffset || 0) + 0.65) % 32;
 
-                    // Anti-burn drift: gentle horizontal wander of the off-screen vanishing point
-                    const driftOffset = Math.sin(bgState.phase * 0.22) * 24;
+                    // Gentle horizontal anti-burn drift of the off-screen vanishing point
+                    const driftOffset = Math.sin(bgState.phase * 0.15) * 18;
                     const cx = w / 2 + driftOffset;
-
-                    // Full-Height Perspective Floor (spans 100% of the visible viewport)
                     const totalDepth = h - horizonY;
 
-                    // 1. Perspective fan lines with lateral harmonic breathing
+                    // 1. Flat, steady perspective fan ribs
                     const numLines = Math.floor(w / 45) + 16;
+                    bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.22)`;
+                    bgCtx.lineWidth = 1.3;
                     for (let i = -numLines; i <= numLines; i++) {
                         const bottomX = cx + i * 95;
-                        const flexOffset = Math.sin(bgState.phase * 0.85 + i * 0.38) * 16;
                         bgCtx.beginPath();
                         bgCtx.moveTo(cx, horizonY);
-                        bgCtx.quadraticCurveTo(
-                            cx + (bottomX - cx) * 0.45 + flexOffset,
-                            horizonY + totalDepth * 0.55,
-                            bottomX,
-                            h + 20
-                        );
-                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.22)`;
-                        bgCtx.lineWidth = 1.3;
+                        bgCtx.lineTo(bottomX, h + 20);
                         bgCtx.stroke();
                     }
 
-                    // 2. Rolling undulating crossbars with traveling elevation waves
-                    const xSegments = 16;
-                    const stepX = w / xSegments;
+                    // 2. Flat, predictable horizontal crossbars scrolling smoothly toward camera
                     for (let y = bgState.gridOffset; y < totalDepth; y += 32) {
                         const ratio = Math.pow(y / totalDepth, 1.85);
                         const basePy = horizonY + ratio * totalDepth;
@@ -2972,24 +3341,199 @@
 
                         const lineAlpha = Math.min(0.68, ratio * 0.74);
                         bgCtx.beginPath();
-                        for (let seg = 0; seg <= xSegments; seg++) {
-                            const px = seg * stepX;
-                            const waveY = Math.sin(bgState.phase * 1.35 + (px / w) * 4.5 + ratio * 8.0) * (ratio * 12);
-                            const py = basePy + waveY;
-                            if (seg === 0) bgCtx.moveTo(px, py);
-                            else bgCtx.lineTo(px, py);
-                        }
+                        bgCtx.moveTo(0, basePy);
+                        bgCtx.lineTo(w, basePy);
                         bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${lineAlpha.toFixed(2)})`;
                         bgCtx.lineWidth = 1.25;
                         bgCtx.stroke();
                     }
 
-                    // 3. Subtle ambient horizon glow fanning downward from top boundary
+                    // 3. Heartbeat Snap Pulses: random data packet surges racing down perspective lines
+                    if (!bgState.gridPulses) bgState.gridPulses = [];
+                    if (bgState.gridPulses.length < 6 && Math.random() < 0.04) {
+                        const maxVisibleIdx = Math.max(4, Math.floor(w / 140));
+                        bgState.gridPulses.push({
+                            lineIdx: Math.floor((Math.random() * 2 - 1) * maxVisibleIdx),
+                            progress: 0.0,
+                            speed: 0.038 + Math.random() * 0.028,
+                            length: 0.12 + Math.random() * 0.10
+                        });
+                    }
+
+                    for (let p = bgState.gridPulses.length - 1; p >= 0; p--) {
+                        const pulse = bgState.gridPulses[p];
+                        pulse.progress += pulse.speed;
+                        if (pulse.progress - pulse.length > 1.05) {
+                            bgState.gridPulses.splice(p, 1);
+                            continue;
+                        }
+                        const bottomX = cx + pulse.lineIdx * 95;
+                        const t0 = Math.max(0, pulse.progress - pulse.length);
+                        const t1 = Math.min(1.02, pulse.progress);
+                        const x0 = cx + (bottomX - cx) * t0;
+                        const y0 = horizonY + (h + 20 - horizonY) * t0;
+                        const x1 = cx + (bottomX - cx) * t1;
+                        const y1 = horizonY + (h + 20 - horizonY) * t1;
+
+                        const pGrad = bgCtx.createLinearGradient(x0, y0, x1, y1);
+                        pGrad.addColorStop(0, 'rgba(0,0,0,0)');
+                        pGrad.addColorStop(0.7, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.85)`);
+                        pGrad.addColorStop(1, `rgba(255, 255, 255, 0.95)`);
+                        bgCtx.beginPath();
+                        bgCtx.moveTo(x0, y0);
+                        bgCtx.lineTo(x1, y1);
+                        bgCtx.strokeStyle = pGrad;
+                        bgCtx.lineWidth = 2.6;
+                        bgCtx.stroke();
+                    }
+
+                    // 4. Subtle ambient horizon glow fanning downward from top boundary
                     const topGlow = bgCtx.createLinearGradient(0, 0, 0, h * 0.35);
                     topGlow.addColorStop(0, `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, 0.18)`);
                     topGlow.addColorStop(1, 'rgba(0,0,0,0)');
                     bgCtx.fillStyle = topGlow;
                     bgCtx.fillRect(0, 0, w, h * 0.35);
+                    break;
+                }
+
+                case 'fireflies': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    const fireflies = bgState.fireflies || [];
+                    for (const f of fireflies) {
+                        // Relaxed Brownian drift (yuru yuru yukkuri)
+                        f.angle += (Math.random() - 0.5) * 0.09;
+                        const speed = (0.18 + 0.14 * f.depth);
+                        f.vx = f.vx * 0.92 + Math.cos(f.angle) * speed * 0.08;
+                        f.vy = f.vy * 0.92 + Math.sin(f.angle) * speed * 0.08;
+                        f.x += f.vx;
+                        f.y += f.vy;
+
+                        // Soft viewport wrap-around
+                        if (f.x < -20) f.x = w + 20;
+                        else if (f.x > w + 20) f.x = -20;
+                        if (f.y < -20) f.y = h + 20;
+                        else if (f.y > h + 20) f.y = -20;
+
+                        // Organic asynchronous fade-blink
+                        f.blinkPhase += f.blinkSpeed;
+                        const glow = Math.pow(0.5 + 0.5 * Math.sin(f.blinkPhase), 2.2);
+                        if (glow < 0.02) continue;
+
+                        const r = f.baseR * (0.85 + 0.3 * glow);
+                        const haloAlpha = (0.22 * glow * f.depth).toFixed(3);
+                        const coreAlpha = (0.90 * glow * f.depth).toFixed(3);
+
+                        // Outer soft halo
+                        bgCtx.beginPath();
+                        bgCtx.arc(f.x, f.y, r * 3.4, 0, Math.PI * 2);
+                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${haloAlpha})`;
+                        bgCtx.fill();
+
+                        // Bright bioluminescent core
+                        bgCtx.beginPath();
+                        bgCtx.arc(f.x, f.y, r, 0, Math.PI * 2);
+                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${coreAlpha})`;
+                        bgCtx.fill();
+                    }
+                    break;
+                }
+
+                case 'cmatrix': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    bgCtx.font = 'bold 15px monospace';
+                    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$%&*+-=<>';
+                    const cols = bgState.cmatrixCols || [];
+                    for (const col of cols) {
+                        col.headRow += col.speed * spd;
+                        const headIdx = Math.floor(col.headRow);
+
+                        // Occasional in-place character mutation
+                        if (Math.random() < 0.18) {
+                            const mIdx = Math.floor(Math.random() * col.length);
+                            col.chars[mIdx] = chars[Math.floor(Math.random() * chars.length)];
+                        }
+
+                        for (let i = 0; i < col.length; i++) {
+                            const r = headIdx - i;
+                            const py = r * col.rowH;
+                            if (py < -20 || py > h + 20) continue;
+                            if (i === 0) {
+                                // Crisp bright lead glyph
+                                bgCtx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+                            } else {
+                                // Discrete stepped terminal brightness decay
+                                const stepAlpha = Math.max(0.08, 1.0 - (i / col.length));
+                                bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${stepAlpha.toFixed(2)})`;
+                            }
+                            bgCtx.fillText(col.chars[i], col.x, py);
+                        }
+
+                        if ((headIdx - col.length) > col.maxRows) {
+                            col.headRow = -Math.floor(Math.random() * 12);
+                        }
+                    }
+                    break;
+                }
+
+                case 'pixelrain': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    const drops = bgState.pixelDrops || [];
+                    for (const d of drops) {
+                        d.y += d.vy * spd;
+                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${d.alpha})`;
+                        bgCtx.fillRect(d.x, d.y, d.w, d.h);
+                        if (d.y > h + 24) {
+                            d.y = -24;
+                            d.x = Math.random() * w;
+                        }
+                    }
+                    break;
+                }
+
+                case 'lasers': {
+                    bgCtx.fillStyle = hexToRgba(state.bgColor, 0.22);
+                    bgCtx.fillRect(0, 0, w, h);
+                    const lasers = bgState.lasers || [];
+                    for (const l of lasers) {
+                        l.pos += l.vel * spd;
+                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${l.alpha.toFixed(2)})`;
+                        if (l.isHoriz) {
+                            if (l.pos < 0 || l.pos > h) l.vel *= -1;
+                            bgCtx.fillRect(0, l.pos, w, l.thickness);
+                        } else {
+                            if (l.pos < 0 || l.pos > w) l.vel *= -1;
+                            bgCtx.fillRect(l.pos, 0, l.thickness, h);
+                        }
+                    }
+                    break;
+                }
+
+                case 'tetriminos': {
+                    bgCtx.clearRect(0, 0, w, h);
+                    const pieces = bgState.tetriminos || [];
+                    for (const p of pieces) {
+                        p.x += p.vx * spd;
+                        p.y += p.vy * spd;
+                        p.angle += p.rotSpeed * spd;
+
+                        if (p.y > h + 60) { p.y = -60; p.x = Math.random() * w; }
+                        if (p.x < -60) p.x = w + 60;
+                        else if (p.x > w + 60) p.x = -60;
+
+                        bgCtx.save();
+                        bgCtx.translate(p.x, p.y);
+                        bgCtx.rotate(p.angle);
+                        bgCtx.fillStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${p.alpha.toFixed(2)})`;
+                        bgCtx.strokeStyle = `rgba(${bgAccentRgb.r}, ${bgAccentRgb.g}, ${bgAccentRgb.b}, ${Math.min(0.85, p.alpha * 1.8).toFixed(2)})`;
+                        bgCtx.lineWidth = 1.2;
+                        for (const [bx, by] of p.shape) {
+                            const rx = (bx - 1.5) * p.cell;
+                            const ry = (by - 0.5) * p.cell;
+                            bgCtx.fillRect(rx, ry, p.cell - 2, p.cell - 2);
+                            bgCtx.strokeRect(rx, ry, p.cell - 2, p.cell - 2);
+                        }
+                        bgCtx.restore();
+                    }
                     break;
                 }
             }
@@ -3168,6 +3712,21 @@
 
             const ecoBtn = document.getElementById('opt-eco-governor');
             if (ecoBtn) ecoBtn.classList.toggle('selected', state.ecoMode);
+
+            const flickerBtn = document.getElementById('opt-flicker');
+            if (flickerBtn) flickerBtn.classList.toggle('selected', !!state.filamentFlicker);
+            const spdSlider = document.getElementById('studio-speed-slider');
+            const spdVal = document.getElementById('studio-speed-val');
+            if (spdSlider && spdVal) {
+                spdSlider.value = state.animSpeed || 1.0;
+                spdVal.textContent = `${Number(state.animSpeed || 1.0).toFixed(2).replace(/\.00$/, '.0')}x`;
+            }
+            const denSlider = document.getElementById('studio-density-slider');
+            const denVal = document.getElementById('studio-density-val');
+            if (denSlider && denVal) {
+                denSlider.value = state.animDensity || 1.0;
+                denVal.textContent = `${Number(state.animDensity || 1.0).toFixed(2).replace(/\.00$/, '.0')}x`;
+            }
 
             document.querySelectorAll('#date-format-group .opt-pill').forEach(btn => {
                 btn.classList.toggle('selected', btn.dataset.datefmt === state.dateFormat);
@@ -3774,6 +4333,96 @@
             requestWakeLock();
             resetIdleTimer();
             showToast('Clockity 4 • On-Demand Ready');
+        }
+
+        // PLN-02: Modular Settings Studio Tabs, Shader Sliders & JSON Preset Backup
+        document.querySelectorAll('.drawer-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tab = btn.dataset.tab;
+                document.querySelectorAll('.drawer-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+                document.querySelectorAll('.drawer-pane').forEach(p => p.classList.toggle('active', p.dataset.tabPanel === tab));
+            });
+        });
+
+        // Filament Flicker Toggle
+        const flickerToggleBtn = document.getElementById('opt-flicker');
+        if (flickerToggleBtn) {
+            flickerToggleBtn.addEventListener('click', () => {
+                state.filamentFlicker = !state.filamentFlicker;
+                applyVisuals();
+                syncDrawerUI();
+                savePreferences();
+            });
+        }
+
+        // Studio Speed & Density Sliders
+        const studioSpeedSlider = document.getElementById('studio-speed-slider');
+        if (studioSpeedSlider) {
+            studioSpeedSlider.addEventListener('input', (e) => {
+                state.animSpeed = parseFloat(e.target.value) || 1.0;
+                syncDrawerUI();
+                savePreferences();
+            });
+        }
+        const studioDensitySlider = document.getElementById('studio-density-slider');
+        if (studioDensitySlider) {
+            studioDensitySlider.addEventListener('input', (e) => {
+                state.animDensity = parseFloat(e.target.value) || 1.0;
+                syncDrawerUI();
+                savePreferences();
+                if (state.bgAnim !== 'none') initBgCanvas();
+            });
+        }
+
+        // JSON Preset Export / Import / Reset
+        const exportBtn = document.getElementById('preset-export-btn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', async () => {
+                savePreferences();
+                const json = localStorage.getItem('clockity_prefs_v3') || '{}';
+                try {
+                    await navigator.clipboard.writeText(json);
+                    showToast('Preset JSON copied to clipboard');
+                } catch (err) {
+                    const blob = new Blob([json], { type: 'application/json' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'clockity-preset.json';
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    showToast('Preset JSON downloaded');
+                }
+            });
+        }
+
+        const importBtn = document.getElementById('preset-import-btn');
+        if (importBtn) {
+            importBtn.addEventListener('click', () => {
+                const raw = prompt('Paste Clockity JSON preset:');
+                if (!raw) return;
+                try {
+                    const parsed = JSON.parse(raw);
+                    Object.keys(parsed).forEach(k => {
+                        if (state[k] !== undefined) state[k] = parsed[k];
+                    });
+                    savePreferences();
+                    applyVisuals();
+                    syncDrawerUI();
+                    applyClockMode();
+                    startBgLoop();
+                    showToast('Preset imported');
+                } catch (err) {
+                    showToast('Invalid JSON preset', false);
+                }
+            });
+        }
+
+        const resetBtn = document.getElementById('preset-reset-btn');
+        if (resetBtn) {
+            resetBtn.addEventListener('click', () => {
+                localStorage.removeItem('clockity_prefs_v3');
+                location.reload();
+            });
         }
 
         if (document.readyState === 'loading') {
